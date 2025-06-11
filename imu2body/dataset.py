@@ -10,6 +10,7 @@ import torch
 from fairmotion.utils import constants
 from IPython import embed
 from imu2body.preprocess import load_data as load_amass_data
+from imu2body.preprocess_gimo import load_data as load_gimo_data
 # from preprocess_bvh import *
 from pytorch3d import transforms
 import constants.motion_data as motion_constants 
@@ -25,23 +26,6 @@ class MotionData(Dataset):
 		"""
 
 		self.debug = debug 
-
-		# if isinstance(dataset_path, list):
-		# 	print("got a list of pkl files")
-		# 	dict_list = []
-		# 	for dataset_file in dataset_path:
-		# 		print(f"loading {dataset_file}")
-		# 		dict_list.append(pickle.load(open(dataset_file, "rb")))
-		# 	# append dict list to create data
-		# 	key_list = dict_list[0].keys()
-		# 	self.data = {}
-		# 	for key in key_list:
-		# 		dict_list_by_key = []
-		# 		for i in range(len(dict_list)):
-		# 			dict_list_by_key.append(dict_list[i][key])
-		# 		self.data[key] = np.concatenate(dict_list_by_key, axis=0)
-		# 		# print(f"finish loading key: {key}")
-		# 	del dict_list
 		if isinstance(dataset_path, list):
 			print("IMU2Body: got a list of pkl files")
 
@@ -137,8 +121,6 @@ class MotionData(Dataset):
 
 	def get_data_dict(self):
 		return self.dim_dict	
-
-
 
 class CustomMotionData(Dataset):
 	def __init__(self, motion_clip_path, custom_config, mean, std, device="cuda", debug=False):
@@ -294,7 +276,29 @@ class RealMotionData(Dataset):
 
 	def get_data_dict(self):
 		return self.dim_dict	
-	
+
+def get_loader_gimo(
+    data_root=None,
+	batch_size=16,
+	training=False,
+	drop_last=True
+):
+	"""Returns data loader for custom dataset.
+	Args:
+		dataset_path: path to pickled numpy dataset
+		device: Device in which data is loaded -- 'cpu' or 'cuda'
+		batch_size: mini-batch size.
+	Returns:
+		data_loader: data loader.
+	"""
+ 
+	dataset = GIMODataset(data_root, training)
+
+	data_loader = DataLoader(
+		dataset=dataset, batch_size=batch_size, shuffle=training, num_workers=8, drop_last=drop_last
+	)
+	return data_loader
+
 
 def get_loader(
 	dataset_path,
@@ -364,17 +368,256 @@ def get_realdata_loader(
 		dataset=dataset, batch_size=1, shuffle=False, num_workers=8,  drop_last=False
 	)
 	return data_loader
+  
+import torch.utils.data as data
+import torch
+from torchvision import transforms
+import numpy as np
+import random
+import os
+import json
+import pickle
+from PIL import Image
+from tqdm import tqdm
+import pandas as pd
+import trimesh
+from scipy.spatial.transform import Rotation
+import bisect
 
+class GIMODataset(data.Dataset):
+    def __init__(self, dataroot, train=False):
+        self.dataroot = dataroot
+        self.train = train
+        
+        # NOTE: Hard coded
+        self.input_seq_len = 40
+        self.output_seq_len = 40
+        self.fps = 30
+        self.sample_points = 200000
+        self.sigma = 0.1
+
+        self.dataset_info = pd.read_csv(os.path.join(self.dataroot, 'dataset.csv'))
+        self.parse_data_info()
+        self.load_scene()
+        self.load_imu()
+
+        self.random_ori_list = [-180, -90, 0, 90]
+        self.transform = transforms.Compose([
+            transforms.Resize(224),
+            transforms.ToTensor(),
+            transforms.Normalize((0.485, 0.456, 0.406),
+                                 (0.229, 0.224, 0.225))
+        ])
+        self.load_data_dict()
+        
+        global_p = self.imu_data['global_p']
+        x_mean = np.mean(global_p.reshape([global_p.shape[0], global_p.shape[1], -1]).transpose([0, 2, 1]), axis=(0, 2), keepdims=True)
+        x_std = np.std(global_p.reshape([global_p.shape[0], global_p.shape[1], -1]).transpose([0, 2, 1]), axis=(0, 2), keepdims=True)
+        self.x_mean = x_mean
+        self.x_std = x_std
+		
+		# normalize 
+        self.mean = np.mean(self.imu_data['input_seq'], axis=(0,1))
+        self.std = np.std(self.imu_data['input_seq'], axis=(0,1))
+
+        
+    def __getitem__(self, index):
+        #======================= imu parameters =======================
+        input_seq = torch.from_numpy(self.imu_data['input_seq'][index]).float()
+        mid_seq = torch.from_numpy(self.imu_data['mid_seq'][index]).float()
+        tgt_seq = torch.from_numpy(self.imu_data['tgt_seq'][index]).float()
+        global_p = torch.from_numpy(self.imu_data['global_p'][index]).float()
+        contact_label = torch.from_numpy(self.imu_data['contact_label'][index]).float()
+        start_frame, end_frame = int(self.imu_data['start_end'][index][0]), int(self.imu_data['start_end'][index][1])
+        scene, seq, transform_path= self.find_scene_seq(index)
+        #======================= imu parameters =======================
+        
+        img_list = os.listdir(os.path.join(self.dataroot, scene, seq, 'PV'))
+        img_list.sort()
+
+        imgs = []
+        poses_input = []
+        poses_input_idx = []
+
+        random_ori = np.random.choice(self.random_ori_list)  # np.random.uniform(-self.config.random_angle, self.config.random_angle)
+        random_rotation = Rotation.from_euler('xyz', [0, random_ori, 0], degrees=True).as_matrix()
+        transform_info = json.load(open(os.path.join(self.dataroot, scene, seq, transform_path), 'r'))
+        scale = transform_info['scale']
+        trans_pose2scene = np.array(transform_info['transformation'])
+        trans_pose2scene[:3, 3] /= scale
+        transform_norm = np.loadtxt(os.path.join(self.dataroot, scene, 'scene_obj', 'transform_norm.txt')).reshape((4, 4))
+        transform_norm[:3, 3] /= scale
+        transform_pose = transform_norm @ trans_pose2scene
+         
+        for f in range(self.input_seq_len):
+            pose_idx = start_frame + int(f * 30 / self.fps)
+            poses_input_idx.append(pose_idx)
+            
+            #=============================prepare_image===========================
+            img_data = Image.open(os.path.join(self.dataroot, scene, seq, 'PV', img_list[pose_idx])).convert('RGB') # Read input image
+            img_data = self.transform(img_data)
+            imgs.append(img_data)
+			#=============================prepare_image===========================
+                        
+            pose_data = pickle.load(open(os.path.join(self.dataroot, scene, seq, 'smplx_local',
+                                                      '{}.pkl'.format(pose_idx)), 'rb'))
+            ori = pose_data['orient'].detach().cpu().numpy()
+            trans = pose_data['trans'].detach().cpu().numpy().reshape((3, 1))
+            R = Rotation.from_rotvec(ori).as_matrix()
+
+            R_s = transform_pose[:3, :3] @ R
+            ori_s = Rotation.from_matrix(R_s).as_rotvec()
+            trans_s = (transform_pose[:3, :3] @ trans + transform_pose[:3, 3:]).reshape(3)
+
+            if self.train:
+                ori_s = Rotation.from_matrix(random_rotation @ R_s).as_rotvec()
+                trans_s = (random_rotation @ trans_s.reshape((3, 1))).reshape(3)
+
+            poses_input.append(
+                torch.cat([torch.from_numpy(ori_s.copy()).float(), torch.from_numpy(trans_s.copy()).float(),
+                           pose_data['latent']]))
+
+        imgs = torch.stack(imgs, dim=0)
+        poses_input = torch.stack(poses_input, dim=0).detach()
+
+		#=============================Scene Point cloud=============================
+        scene_points = self.scene_list['{}_{}'.format(scene, seq)]
+        scene_points = scene_points[np.random.choice(range(len(scene_points)), self.sample_points)]
+        scene_points *= 1 / scale
+        scene_points = (transform_norm[:3, :3] @ scene_points.T + transform_norm[:3, 3:]).T
+        if self.train:
+            scene_points = (random_rotation @ scene_points.T).T
+            scene_points += np.random.normal(loc=0, scale=self.sigma, size=scene_points.shape)
+        #=============================Scene Point cloud=============================
+        
+		#=============================IMU Parameters=============================
+        input_ = {}
+        input_['input_seq'] = input_seq.float()
+        input_['mid_seq'] = mid_seq.float()
+        input_['tgt_seq'] = tgt_seq.float()
+        input_['global_p'] = global_p.float()
+        input_['root'] = global_p[..., 0, :].float()
+        input_['contact_label'] = contact_label.float()
+        #=============================IMU Parameters=============================
+    	# VPoser Latent
+        input_['poses_input'] = poses_input 
+		# SMPL_vertices
+        #input_['smplx_vertices'] = smplx_vertices
+
+		# Scene Points
+        input_['scene_points'] =  torch.from_numpy(scene_points).float()
+        # Input Images
+        input_['imgs'] = imgs
+        #==============================              
+  
+        return input_
+
+    def __len__(self):
+        return self.imu_data['input_seq'].shape[0]
+
+    def parse_data_info(self):
+        self.sequences_path_list = []
+        self.scenes_path_list = []
+        self.trans_path_list = []
+        self.poses_path_list = []
+        self.start_end_list = []
+        for i, seq in enumerate(self.dataset_info['sequence_path']):
+            if self.dataset_info['training'][i] != self.train:
+                continue
+            start_frame = self.dataset_info['start_frame'][i]
+            end_frame = self.dataset_info['end_frame'][i]
+            scene = self.dataset_info['scene'][i]
+            transform = self.dataset_info['transformation'][i]
+            
+            self.poses_path_list.append(start_frame)
+            self.sequences_path_list.append(seq)
+            self.scenes_path_list.append(scene)
+            self.trans_path_list.append(transform)
+            self.start_end_list.append([self.dataset_info['start_frame'][i], self.dataset_info['end_frame'][i]])
+            
+    def load_imu(self):
+        self.imu_data = {}
+        self.imu_seq_info = []  # 新增列表，记录每个seq的元数据和索引范围
+        for i, seq in enumerate(self.dataset_info['sequence_path']):
+            if self.dataset_info['training'][i] != self.train: 
+                continue # ignore the test/validation
+            scene = self.dataset_info['scene'][i]
+            start_frame = self.dataset_info['start_frame'][i]   
+            end_frame = self.dataset_info['end_frame'][i]
+            transform = self.dataset_info['transformation'][i]
+            with open(os.path.join(self.dataroot, scene, seq, "IMU", f'imu_{start_frame}_{end_frame}.pkl'), 'rb') as f:
+                imu_param = pickle.load(f)
+                for k, v in imu_param.items():
+                    if k not in self.imu_data.keys():
+                        self.imu_data[k] = []
+                    self.imu_data[k] += [v]
+                    seq_info = v.shape[0]
+                     
+                self.imu_seq_info.append({
+					'scene': scene,
+					'seq': seq,
+					'transform': transform,
+					'length': seq_info  # 后续计算索引
+           		 })
+
+        for k, v in self.imu_data.items():
+            self.imu_data[k] = np.concat(v, axis=0)
+		
+		# 计算每个seq在合并后的数据中的索引范围
+        current_idx = 0
+        for seq_info in self.imu_seq_info:
+            seq_length = seq_info['length']
+            seq_info['start'] = current_idx
+            seq_info['end'] = current_idx + seq_length
+            current_idx += seq_length
+            
+        print('IMU information load done')
+
+    def find_scene_seq(self, idx):
+        starts = [seq_info["start"] for seq_info in self.imu_seq_info]
+        pos = bisect.bisect_right(starts, idx) - 1
+		
+        if 0 <= pos < len(self.imu_seq_info):
+            seq_info = self.imu_seq_info[pos]
+            if seq_info["start"] <= idx < seq_info["end"]:
+                return seq_info["scene"], seq_info["seq"], seq_info["transform"]
+		
+        return None, None
+                 
+    def load_data_dict(self):
+        data_sample = self.__getitem__(0)
+        seq_len, input_seq_dim = data_sample['input_seq'].shape
+        assert seq_len == motion_constants.preprocess_window, "seq length should be same as window size in preprocessing! check preprocess.py"
+
+        mid_seq_dim = data_sample['mid_seq'].shape[1]
+        output_seq_dim = data_sample['tgt_seq'].shape[1]
+
+        self.dim_dict = {}
+        self.dim_dict['input_dim'] = input_seq_dim
+        self.dim_dict['mid_dim'] = mid_seq_dim
+        self.dim_dict['output_dim'] = output_seq_dim
+        
+    def get_data_dict(self):
+        return self.dim_dict	
+                
+    def load_scene(self):
+        self.scene_list = {}
+        for i, seq in enumerate(self.dataset_info['sequence_path']):
+            if self.dataset_info['training'][i] != self.train: 
+                continue # ignore the test/validation
+            scene = self.dataset_info['scene'][i]
+            #start_frame = self.dataset_info['start_frame'][i]
+            scene_ply = trimesh.load(os.path.join(self.dataroot, scene, 'scene_obj', 'scene_downsampled.ply'))
+            # print(scene_ply.vertices.shape)
+            scene_points = scene_ply.vertices
+            self.scene_list['{}_{}'.format(scene, seq)] = scene_points
+        print('Scene load done')
+            
 if __name__=="__main__":
-	# test when list of train.pkl files are given
-	train_dataset = MotionData(["./data_preprocess_v2/train_1.pkl", "./data_preprocess_v2/train_2.pkl"], device="cuda") 
-	fnames = ["test", "validation"]
-	datasets = {}
-	for fname in fnames:
-		print(fname)
-		datasets[fname] = MotionData(f"./data_preprocess_v2/{fname}.pkl", device="cuda")
-	# fnames = ['custom']
-	# datasets = {}
-	# for fname in fnames:
-	# 	datasets[fnames] = MotionData(f"./data/preprocess_norm/{fname}.pkl", "cpu")
-	# lafan_data = MotionData('./data/lafan_mxm/', device="cpu")
+
+	data_root = '/hpc2hdd/home/gzhang292/nanjie/project6/orion/group/GIMO'
+	training = False
+	train_dataset = GIMODataset(data_root, training)
+	data_sample = train_dataset[0]
+
+	print('')

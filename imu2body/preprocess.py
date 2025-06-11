@@ -57,6 +57,7 @@ def load_data_from_amass(base_dir, file_list, debug=False, custom_config=None):
 		body_model = amass.load_body_model(bm_path=bm_path)
 		skel_with_offset = amass.create_skeleton_from_amass_bodymodel(bm=body_model)	
 		skel = skel_with_offset[0]
+		#motion_list = amass.create_motion_from_amass_data(npz_files, bm=body_model, skel_with_offset=deepcopy(skel_with_offset))
 		motion_list = utils.run_parallel(amass.create_motion_from_amass_data, npz_files, num_cpus=num_cpus, bm=body_model, skel_with_offset=deepcopy(skel_with_offset))
 
 		if len(bvh_files) > 0:
@@ -279,8 +280,6 @@ def parse_filenames_and_load(args):
 	utils.create_dir_if_absent(dest)
 	config_copy_command = f"cp -r {args.data_config_path} {args.preprocess_path}"
 	os.system(config_copy_command)
-
-
 
 if __name__ == "__main__":
 

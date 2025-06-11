@@ -383,7 +383,6 @@ class Viewer:
             | GLUT_DOUBLE
             | GLUT_ALPHA
             | GLUT_DEPTH
-            # | GLUT_MULTISAMPLE
         )
         glutInitWindowSize(*self.window_size)
         glutInitWindowPosition(0, 0)

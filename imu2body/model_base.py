@@ -36,7 +36,7 @@ class PositionalEncoding(nn.Module):
 
 class TransformerEncoderModel(nn.Module):
     def __init__(
-        self, input_dim, output_dim, hidden_dim=1024, num_layers=4, num_heads=8, dropout=0.1, estimate_contact=False
+        self, input_dim, output_dim, hidden_dim=1024, num_layers=4, num_heads=8, dropout=0.1, estimate_contact=False, temporal = True
     ):
         """
         input_dim: this is the dimension of the input
@@ -45,6 +45,7 @@ class TransformerEncoderModel(nn.Module):
         num_layers: the number of layers in transformer encoder and decoder. can be either 1 or 4
 
         """
+        self.temporal = temporal
         self.mid_dim = None
         if isinstance(input_dim, tuple):
             self.input_dim, self.mid_dim = input_dim
@@ -63,6 +64,9 @@ class TransformerEncoderModel(nn.Module):
             num_layers=num_layers,
             norm=LayerNorm(hidden_dim),
         )
+        
+        if self.temporal:
+            self.time_encoder = torch.nn.LSTM(hidden_dim, hidden_dim, 1, bidirectional=False, batch_first=True)
 
         # Use Linear instead of Embedding for continuous valued input
         if self.mid_dim is not None:
@@ -87,21 +91,11 @@ class TransformerEncoderModel(nn.Module):
                 )        
             decode_dim += 2
 
-        # self.estimate_foot = estimate_foot
-        # if self.estimate_foot:
-            # self.foot_decoder = nn.Sequential(
-            #                     nn.Linear(hidden_dim, 256),
-            #                     nn.ReLU(),
-            #                     nn.Linear(256, 6)
-            #     )        
-            # decode_dim += 6
-
         self.linear_decoder = nn.Sequential(
                             nn.Linear(decode_dim, 256),
                             nn.ReLU(),
                             nn.Linear(256, output_dim)
             )
-        
         
         self.init_weights()
 
@@ -127,6 +121,9 @@ class TransformerEncoderModel(nn.Module):
 
         pos_encoded_src = self.pos_encoder(projected_src) # [seq, batch, hidden_dim]
         encoder_output = self.transformer_encoder(pos_encoded_src) # [seq, batch, ninp] encoder output
+        #40,128,1280
+        if self.temporal:
+            encoder_output, _ = self.time_encoder(encoder_output)
 
         if self.estimate_contact:
             contact_output = self.contact_decoder(encoder_output) # [seq, batch, 18]
@@ -141,3 +138,36 @@ class TransformerEncoderModel(nn.Module):
         return None, output.transpose(0, 1) # [batch, seq, output_dim]
 
         # return output.transpose(0, 1) # [batch, seq, output_dim]
+
+class temporal_attention(nn.Module):
+    def __init__(self, in_dim=1280, out_dim=1280, hidden_dim=512, num_layers=6, num_heads=4, residual=False):
+        super(temporal_attention, self).__init__()
+        self.hdim = hidden_dim
+        self.out_dim = out_dim
+        self.residual = residual
+        self.l1 = nn.Linear(in_dim, hidden_dim)
+        self.l2 = nn.Linear(hidden_dim, out_dim)
+
+        self.pos_embedding = PositionalEncoding(hidden_dim, dropout=0.1)
+        TranLayer = nn.TransformerEncoderLayer(d_model=hidden_dim, nhead=num_heads, dim_feedforward=1024,
+                                               dropout=0.1, activation='gelu')
+        self.trans = nn.TransformerEncoder(TranLayer, num_layers=num_layers)
+        
+        nn.init.xavier_uniform_(self.l1.weight, gain=0.01)
+        nn.init.xavier_uniform_(self.l2.weight, gain=0.01)
+
+    def forward(self, x):
+        x = x.permute(1,0,2)  # (b,t,c) -> (t,b,c)
+
+        h = self.l1(x)
+        h = self.pos_embedding(h)
+        h = self.trans(h)
+        h = self.l2(h)
+
+        if self.residual:
+            x = x[..., :self.out_dim] + h
+        else:
+            x = h
+        x = x.permute(1,0,2)
+
+        return x

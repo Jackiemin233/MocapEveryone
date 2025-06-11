@@ -1,5 +1,5 @@
 data:
-    preprocess: PATH_TO_PREPROCESS_PATH
+    preprocess: ../data/amass_dataset_processed
 
 model:
     hidden_dim1: 1280 
@@ -9,7 +9,7 @@ model:
     sep_encoder: True 
     
 train:
-    batch_size: 256
+    batch_size: 256 #256
     loss_pos_weight: 1.5
     loss_quat_weight: 1.25
     loss_root_weight: 1.0
