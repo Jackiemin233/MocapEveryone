@@ -4,3 +4,6 @@ __pycache__
 /data/
 output
 results
+/libraries/MASt3R-SLAM
+/libraries/S2Fusion
+/libraries/Tracking-Anything-with-DEVA
