@@ -138,7 +138,7 @@ def create_motion_from_amass_data(filename, bm, skel_with_offset=None, default_b
 	
 	if "mocap_frame_rate" not in bdata.files:
 		return None
-	fps = float(bdata["mocap_frame_rate"])    
+	fps = float(bdata["mocap_frame_rate"])    #120
 	root_orient = bdata["poses"][:, :3]  # controls the global root orientation (frame, 3)
 	pose_body = bdata["poses"][:, 3:66]  # controls body joint angles (frame, 63)
 	trans = bdata["trans"][:, :3]  # controls root translation (frame, 3)

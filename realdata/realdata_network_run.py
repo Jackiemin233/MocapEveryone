@@ -510,7 +510,6 @@ if __name__ == "__main__":
 	parser.add_argument("--custom_datapath", type=str, default="")
 	parser.add_argument("--offset-size", type=int, help="# of frames to slide per window", default=0)
 
-
 	args = parser.parse_args()
 	
 	custom_run = IMU2BodyRealdataRun(args=args)

@@ -20,6 +20,15 @@ import imu2body_eval.amass_smplh as amass_smplh
 
 CUR_BM_TYPE = "smplx"
 
+'''
+python3 run_gimo.py --test_name=MODEL_NAME --mode=test --config=example_config 
+# results would be saved in output/MODEL_NAME/testset_{IDX}/{MM-DD-HH-SS}.pkl
+python3 visualize_testset.py --test-name=MODEL_NAME --idx=IDX --file-name=MM-DD-HH-SS
+python3 visualize_testset.py --test-name=lstm_40 --idx=112 --file-name=06-16-18-29
+
+xvfb-run -a python3 visualize_testset.py --test-name=lstm_40 --idx=112 --file-name=06-16-18-29
+'''
+
 class RenderData(object):
 	def __init__(self, gt_root, gt_rot, output_root, output_rot, use_gt=True):
 		self.output_root = output_root # [seq_len, 3]
@@ -98,7 +107,7 @@ def parse_output(args):
 	result_dict = {}
 
 	# select random 200 indices and convert to fairmotion class
-	num_motions = 200
+	num_motions = 10
 	filepath = f"./output/{args.test_name}/testset_{args.idx}/{args.file_name}.pkl"
 	data = pickle.load(open(filepath, "rb"))
 
@@ -137,7 +146,7 @@ if __name__ == "__main__":
 	parser.add_argument("--idx")
 	parser.add_argument("--file-name")
 	parser.add_argument("--skel", type=str)
-	parser.add_argument("--bm-path",default="../data/smpl_models/smplx/SMPLX_NEUTRAL.npz")\
+	parser.add_argument("--bm-path", default="../data/smpl_models/smplx/SMPLX_NEUTRAL.npz")
 	
 	parser = add_render_argparse(parser=parser)
 	args = parser.parse_args()

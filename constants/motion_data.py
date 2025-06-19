@@ -100,8 +100,8 @@ plane = np.array([1,0,1]) if UP_AXIS == "y" else np.array([1,1,0])
 facing_dir_env = np.array([0,0,1]) if UP_AXIS == "y" else np.array([0,-1,0])
 
 # preprocess related
-preprocess_window = 40
-preprocess_offset = 3
+preprocess_window = 40 #40
+preprocess_offset = 3 #3
 
 # smpl vertices
 smpl_forehead_vertices = [

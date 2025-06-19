@@ -238,9 +238,9 @@ class RealdataNetworkViewer(glut_viewer.Viewer):
 			self.cur_frame = 0
 			self.time_checker.begin()
 			
-			if self.use_msaa:
-				self._init_single_sample_fbo()
-				self._init_msaa()
+			# if self.use_msaa:
+			# 	self._init_single_sample_fbo()
+			# 	self._init_msaa()
 
 			print(f"Current pointcloud size: {self.pcd_point_size}")
 			
@@ -259,7 +259,7 @@ class RealdataNetworkViewer(glut_viewer.Viewer):
 
 			num_frames = self.result_dict['motion']['result'].num_frames()
 
-			start_end_frame_str = input("Enter frame range to record: ")
+			start_end_frame_str = input("Enter frame range to record: ") #0 4000
 			start_end_frame = start_end_frame_str.split()
 			start_frame = int(start_end_frame[0])
 			end_frame = int(start_end_frame[1])
@@ -272,7 +272,7 @@ class RealdataNetworkViewer(glut_viewer.Viewer):
 				self.record = True
 				self.cur_frame = i
 				name = "output_%05d" % (img_count)
-				self.save_screen(dir=save_path, name=name, render=True, save_alpha_channel=False)
+				self.save_screen(dir=save_path, name=name, render=False, save_alpha_channel=False)
 				img_count += 1
 
 			# run ffmpeg in 30fps
@@ -304,7 +304,6 @@ class RealdataNetworkViewer(glut_viewer.Viewer):
 				video_writer.release()
 
 			self.record = False
-
 
 		else:
 			return False

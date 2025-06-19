@@ -62,7 +62,6 @@ if __name__ == "__main__":
 		import demo_video_visualizer.rdn_visualizer as vis 
 		result_dict['motion']['result'] = deepcopy(result_dict['motion']['watch_cam'])
 		del result_dict['motion']['watch_cam']
-
 		network_vis = vis.load_visualizer(result_dict=result_dict, args=args)
 		network_vis.run()
 

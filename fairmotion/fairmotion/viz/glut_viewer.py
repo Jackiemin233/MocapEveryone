@@ -1,6 +1,6 @@
 # Copyright (c) Facebook, Inc. and its affiliates.
 import os
-# os.environ['PYOPENGL_PLATFORM'] = 'egl'
+#os.environ['PYOPENGL_PLATFORM'] = 'egl'
 from OpenGL.GL import *
 from OpenGL.GLU import *
 from OpenGL.GLUT import *
@@ -279,13 +279,14 @@ class Viewer:
             glPopAttrib()
 
         if self.use_msaa:
-            self._post_process_msaa()
+            self._post_process_msaa() # NOTE: MSAA 
 
         if swap_buffer:
             glutSwapBuffers()
 
     def _init_msaa(self):
         num_samples = glGetIntegerv(GL_MAX_SAMPLES)
+        #num_samples = min(glGetIntegerv(GL_MAX_SAMPLES), 4)
 
         print('num_samples_for_msaa:', num_samples)
 
@@ -377,13 +378,15 @@ class Viewer:
 
     def run(self):
         # Init glut
+        '''
+        export DISPLAY=localhost:8000 
+        '''
         glutInit(())
         glutInitDisplayMode(
             GLUT_RGBA
             | GLUT_DOUBLE
             | GLUT_ALPHA
             | GLUT_DEPTH
-            # | GLUT_MULTISAMPLE
         )
         glutInitWindowSize(*self.window_size)
         glutInitWindowPosition(0, 0)
@@ -391,7 +394,7 @@ class Viewer:
         self.window = glutCreateWindow(self.title)
 
         # Init functions
-        # glutFullScreen()
+        #glutFullScreen()
         glutDisplayFunc(self.draw_GL)
         glutIdleFunc(self.idle_callback)
         glutReshapeFunc(self.resize_GL)

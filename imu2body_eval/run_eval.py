@@ -163,14 +163,12 @@ class IMU2BodyNetworkEval(object):
 		self.model.load_state_dict(torch.load(os.path.join(self.model_dir, 'model.pkl')))
 		logging.info("pretrained model loaded")
 
-
 	def build_optimizer(self):
 		logging.info("Preparing optimizer...")
 
 		self.optimizer = dadaptation.DAdaptAdam(self.model.parameters(), lr=1.0, decouple=True, weight_decay=1.0) # use AdamW
 		self.optimizer.load_state_dict(torch.load(os.path.join(self.model_dir + 'optimizer.pkl')))
 		logging.info("optimizer loaded")
-
 
 	def run_per_file(self, file_dict):
 		sampled_batch = file_dict
@@ -328,8 +326,6 @@ class IMU2BodyNetworkEval(object):
 		if self.load_vis:
 			return render_result_dict
 		
-
-
 	def get_loss(self, output_tuple, gt_tuple, get_results=False, get_loss=True, is_eval=False):
 		mid_ee, contact_output, output_seq = output_tuple
 
@@ -366,7 +362,6 @@ class IMU2BodyNetworkEval(object):
 
 			return result_dict
 		
-
 		change_mode_epoch = 40
 		root_diff = torch.abs(output_seq[...,:3] - tgt_seq[...,:3]) / self.x_std[...,0,:]
 
@@ -420,13 +415,11 @@ class IMU2BodyNetworkEval(object):
 
 		return (output_root, transforms.rotation_6d_to_matrix(output_joint_rot)) if get_results else None
 
-
 	def optimize(self):
 		self.optimizer.zero_grad()
 		self.loss_total.backward()
 		torch.nn.utils.clip_grad_norm_(self.model.parameters(), 0.5)
-		self.optimizer.step()
-	
+		self.optimizer.step()	
 	
 	def update(self, epoch, steps_per_epoch, idx):
 		self.writer.add_scalar('loss_pos', self.pos_mean_loss.item(), global_step = epoch * steps_per_epoch + idx)

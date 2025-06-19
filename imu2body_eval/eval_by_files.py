@@ -45,6 +45,11 @@ logging.basicConfig(
 	level=logging.INFO,
 )
 
+"""
+python3 eval_by_files.py --data-config-path=./data_config/ --base-dir=/hpc2hdd/home/gzhang292/nanjie/project6/MocapEvery/data/amass_dataset_raw  --save-path=/hpc2hdd/home/gzhang292/nanjie/project6/MocapEvery/data/TotalCapture_dataset_processed --data-type=tc
+python3 run_eval.py --test_name=imu_pretrained --mode=test --eval-path=PATH_TO_SAVE_PREPROCESS_TC  
+"""
+
 bm_path = "../data/smpl_models/smplh/male/model.npz"
 
 
@@ -244,8 +249,6 @@ def load_data_from_amass(base_dir, file_list, save_path, debug=False):
 
 		with open(os.path.join(save_path_per_file, f"{idx}.pkl"), "wb") as file:
 			pickle.dump(result_dict, file, protocol=pickle.HIGHEST_PROTOCOL)
-
-
 
 def load_filelist(args):
 	test_txt_filename = ""
