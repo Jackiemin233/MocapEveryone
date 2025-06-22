@@ -100,7 +100,7 @@ def create_skeleton_from_amass_bodymodel(bm, betas=None):
 
 	pose_body_zeros = torch.zeros((1, 3 * (num_joints - 1))) # generate t-pose
 	body = bm(pose_body=pose_body_zeros, betas=betas)
-	base_position = body.Jtr.detach().numpy()[0, 0:num_joints]
+	base_position = body.Jtr.detach().numpy()[0, 0:num_joints] # [1, 55, 3] Actually its a SMPL-X model
 	parents = bm.kintree_table[0].long()[:num_joints]
 	joints = []
 	for i in range(num_joints):

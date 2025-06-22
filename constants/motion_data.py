@@ -86,9 +86,6 @@ LEG_JOINTS = [
 HAND_JOINTS = [
     "LeftHand",
     "RightHand",
-    # "LeftFoot",
-    # "RightFoot",
-    # "Head"
 ]
 
 NUM_JOINTS = len(JOINT_NAMES)
