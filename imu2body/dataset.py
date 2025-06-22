@@ -295,7 +295,11 @@ def get_loader_gimo(
 	dataset = GIMODataset(data_root, training)
 
 	data_loader = DataLoader(
+<<<<<<< HEAD
 		dataset=dataset, batch_size=batch_size, shuffle=training, num_workers=32, drop_last=drop_last
+=======
+		dataset=dataset, batch_size=batch_size, shuffle=training, num_workers=8, drop_last=drop_last
+>>>>>>> 0cefc44b7dcebe23eec0d174651cf8a57cdd8f91
 	)
 	return data_loader
 
@@ -395,7 +399,10 @@ class GIMODataset(data.Dataset):
         self.fps = 30
         self.sample_points = 200000
         self.sigma = 0.1
+<<<<<<< HEAD
         self.img_size = 224
+=======
+>>>>>>> 0cefc44b7dcebe23eec0d174651cf8a57cdd8f91
 
         self.dataset_info = pd.read_csv(os.path.join(self.dataroot, 'dataset.csv'))
         self.parse_data_info()
@@ -404,7 +411,11 @@ class GIMODataset(data.Dataset):
 
         self.random_ori_list = [-180, -90, 0, 90]
         self.transform = transforms.Compose([
+<<<<<<< HEAD
             transforms.Resize(self.img_size),
+=======
+            transforms.Resize(224),
+>>>>>>> 0cefc44b7dcebe23eec0d174651cf8a57cdd8f91
             transforms.ToTensor(),
             transforms.Normalize((0.485, 0.456, 0.406),
                                  (0.229, 0.224, 0.225))
@@ -420,7 +431,12 @@ class GIMODataset(data.Dataset):
 		# normalize 
         self.mean = np.mean(self.imu_data['input_seq'], axis=(0,1))
         self.std = np.std(self.imu_data['input_seq'], axis=(0,1))
+<<<<<<< HEAD
  
+=======
+
+        
+>>>>>>> 0cefc44b7dcebe23eec0d174651cf8a57cdd8f91
     def __getitem__(self, index):
         #======================= imu parameters =======================
         input_seq = torch.from_numpy(self.imu_data['input_seq'][index]).float()
@@ -429,8 +445,11 @@ class GIMODataset(data.Dataset):
         global_p = torch.from_numpy(self.imu_data['global_p'][index]).float()
         contact_label = torch.from_numpy(self.imu_data['contact_label'][index]).float()
         start_frame, end_frame = int(self.imu_data['start_end'][index][0]), int(self.imu_data['start_end'][index][1])
+<<<<<<< HEAD
         local_rot = torch.from_numpy(self.imu_data['local_rot'][index]).float()
         head_start = torch.from_numpy(self.imu_data['head_start'][index]).float()
+=======
+>>>>>>> 0cefc44b7dcebe23eec0d174651cf8a57cdd8f91
         scene, seq, transform_path= self.find_scene_seq(index)
         #======================= imu parameters =======================
         
@@ -500,8 +519,11 @@ class GIMODataset(data.Dataset):
         input_['global_p'] = global_p.float()
         input_['root'] = global_p[..., 0, :].float()
         input_['contact_label'] = contact_label.float()
+<<<<<<< HEAD
         input_['local_rot'] = local_rot.float()
         input_['head_start'] = head_start.float()
+=======
+>>>>>>> 0cefc44b7dcebe23eec0d174651cf8a57cdd8f91
         #=============================IMU Parameters=============================
     	# VPoser Latent
         input_['poses_input'] = poses_input 

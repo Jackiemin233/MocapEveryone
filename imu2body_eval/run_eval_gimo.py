@@ -7,7 +7,11 @@ from copy import deepcopy
 import logging
 import numpy as np
 import random
+<<<<<<< HEAD
 # os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+=======
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+>>>>>>> 0cefc44b7dcebe23eec0d174651cf8a57cdd8f91
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -32,9 +36,13 @@ from tensorboardX import SummaryWriter
 
 
 """
+<<<<<<< HEAD
 python3 run_eval_gimo.py --test_name=Normalized --mode=test --eval-path==/home/zhanggangjian/nanjie/project6/MocapEvery/data/gimo_dataset_processed_eval
 
 
+=======
+python3 run_eval.py --test_name=Normalized --mode=test --eval-path=/hpc2hdd/home/gzhang292/nanjie/project6/MocapEvery/data/gimo_dataset_processed_eval
+>>>>>>> 0cefc44b7dcebe23eec0d174651cf8a57cdd8f91
 """
  
 logging.basicConfig(
@@ -66,7 +74,11 @@ class IMU2BodyNetworkEval(object):
 		self.eval_test_directory = args.eval_path
 
 		# open config file
+<<<<<<< HEAD
 		config_dir = "./config/" + args.config + ".yaml" if self.mode == "train" else self.directory + "config.yaml"
+=======
+		config_dir = "./config/"+args.config + ".yaml" if self.mode == "train" else self.directory + "config.yaml"
+>>>>>>> 0cefc44b7dcebe23eec0d174651cf8a57cdd8f91
 		self.config = yaml.safe_load(open(config_dir, 'r').read())
 
 		if self.mode == "train":
@@ -107,6 +119,11 @@ class IMU2BodyNetworkEval(object):
 		if not os.path.exists(self.model_dir):
 			os.mkdir(self.model_dir)
 
+<<<<<<< HEAD
+=======
+
+
+>>>>>>> 0cefc44b7dcebe23eec0d174651cf8a57cdd8f91
 	def set_skel_info(self):
 
 		body_model = amass_smplh.load_body_model(motion_constants.SMPLH_BM_PATH)
@@ -159,7 +176,11 @@ class IMU2BodyNetworkEval(object):
 
 		self.model = imu2body_eval.model.load_model(data_config=data_dict, model_config=model_dict)
 		self.model = self.model.to(self.device)
+<<<<<<< HEAD
 		#self.model = nn.DataParallel(self.model)
+=======
+		self.model = nn.DataParallel(self.model)
+>>>>>>> 0cefc44b7dcebe23eec0d174651cf8a57cdd8f91
 
 		self.model.zero_grad()
 		
@@ -188,7 +209,11 @@ class IMU2BodyNetworkEval(object):
 		output_tuple = self.model(input_seq)
 		results = self.get_loss(output_tuple=output_tuple, gt_tuple=sampled_batch, \
 								get_results=False, \
+<<<<<<< HEAD
 								get_loss=True, \
+=======
+								get_loss=False, \
+>>>>>>> 0cefc44b7dcebe23eec0d174651cf8a57cdd8f91
 								is_eval=True) 
 		
 		start_T = sampled_batch['head_start'].to(self.device)

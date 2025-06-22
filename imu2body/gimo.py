@@ -100,7 +100,11 @@ def create_skeleton_from_amass_bodymodel(bm, betas=None):
 
 	pose_body_zeros = torch.zeros((1, 3 * (num_joints - 1))) # generate t-pose
 	body = bm(pose_body=pose_body_zeros, betas=betas)
+<<<<<<< HEAD
 	base_position = body.Jtr.detach().numpy()[0, 0:num_joints] # [1, 55, 3] Actually its a SMPL-X model
+=======
+	base_position = body.Jtr.detach().numpy()[0, 0:num_joints]
+>>>>>>> 0cefc44b7dcebe23eec0d174651cf8a57cdd8f91
 	parents = bm.kintree_table[0].long()[:num_joints]
 	joints = []
 	for i in range(num_joints):
@@ -133,7 +137,11 @@ def create_skeleton_from_amass_bodymodel(bm, betas=None):
 
 def create_motion_from_gimo_data(filename, bm, skel_with_offset=None, default_beta=True, load_motion=True):        
 	try:
+<<<<<<< HEAD
 		# NOTE: For Single process 
+=======
+		# NOTE: For Single process
+>>>>>>> 0cefc44b7dcebe23eec0d174651cf8a57cdd8f91
 		with torch.no_grad():
 			n = len(filename)
 			bdata = {}

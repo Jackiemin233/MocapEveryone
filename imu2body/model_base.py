@@ -66,7 +66,11 @@ class TransformerEncoderModel(nn.Module):
         )
         
         if self.temporal:
+<<<<<<< HEAD
             self.time_encoder = torch.nn.LSTM(hidden_dim, hidden_dim, num_layers=1, bidirectional=False, batch_first=False)
+=======
+            self.time_encoder = torch.nn.LSTM(hidden_dim, hidden_dim, 1, bidirectional=False, batch_first=True)
+>>>>>>> 0cefc44b7dcebe23eec0d174651cf8a57cdd8f91
 
         # Use Linear instead of Embedding for continuous valued input
         if self.mid_dim is not None:
@@ -121,10 +125,16 @@ class TransformerEncoderModel(nn.Module):
 
         pos_encoded_src = self.pos_encoder(projected_src) # [seq, batch, hidden_dim]
         encoder_output = self.transformer_encoder(pos_encoded_src) # [seq, batch, ninp] encoder output
+<<<<<<< HEAD
         #40,batch,1280
         if self.temporal:
             encoder_output, _ = self.time_encoder(encoder_output)
             #encoder_output = self.temporal_attn(encoder_output)
+=======
+        #40,128,1280
+        if self.temporal:
+            encoder_output, _ = self.time_encoder(encoder_output)
+>>>>>>> 0cefc44b7dcebe23eec0d174651cf8a57cdd8f91
 
         if self.estimate_contact:
             contact_output = self.contact_decoder(encoder_output) # [seq, batch, 18]
@@ -139,6 +149,7 @@ class TransformerEncoderModel(nn.Module):
         return None, output.transpose(0, 1) # [batch, seq, output_dim]
 
         # return output.transpose(0, 1) # [batch, seq, output_dim]
+<<<<<<< HEAD
         
 class Dinov2Backbone(nn.Module):
     def __init__(self, name='dinov2_vitb14', pretrained=False):
@@ -192,3 +203,38 @@ class Dinov2Backbone(nn.Module):
 #         x = x.permute(1,0,2)
 
 #         return x
+=======
+
+class temporal_attention(nn.Module):
+    def __init__(self, in_dim=1280, out_dim=1280, hidden_dim=512, num_layers=6, num_heads=4, residual=False):
+        super(temporal_attention, self).__init__()
+        self.hdim = hidden_dim
+        self.out_dim = out_dim
+        self.residual = residual
+        self.l1 = nn.Linear(in_dim, hidden_dim)
+        self.l2 = nn.Linear(hidden_dim, out_dim)
+
+        self.pos_embedding = PositionalEncoding(hidden_dim, dropout=0.1)
+        TranLayer = nn.TransformerEncoderLayer(d_model=hidden_dim, nhead=num_heads, dim_feedforward=1024,
+                                               dropout=0.1, activation='gelu')
+        self.trans = nn.TransformerEncoder(TranLayer, num_layers=num_layers)
+        
+        nn.init.xavier_uniform_(self.l1.weight, gain=0.01)
+        nn.init.xavier_uniform_(self.l2.weight, gain=0.01)
+
+    def forward(self, x):
+        x = x.permute(1,0,2)  # (b,t,c) -> (t,b,c)
+
+        h = self.l1(x)
+        h = self.pos_embedding(h)
+        h = self.trans(h)
+        h = self.l2(h)
+
+        if self.residual:
+            x = x[..., :self.out_dim] + h
+        else:
+            x = h
+        x = x.permute(1,0,2)
+
+        return x
+>>>>>>> 0cefc44b7dcebe23eec0d174651cf8a57cdd8f91

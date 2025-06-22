@@ -7,7 +7,11 @@ from copy import deepcopy
 import logging
 import numpy as np
 import random
+<<<<<<< HEAD
 os.environ["CUDA_VISIBLE_DEVICES"] = "5"
+=======
+os.environ["CUDA_VISIBLE_DEVICES"] = "0,1"
+>>>>>>> 0cefc44b7dcebe23eec0d174651cf8a57cdd8f91
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -29,6 +33,7 @@ from eval.metrics import *
 
 from tensorboardX import SummaryWriter
 
+<<<<<<< HEAD
 from accelerate import Accelerator
 
 '''
@@ -44,6 +49,11 @@ from accelerate import Accelerator
  	NCCL_P2P_DISABLE=1 CUDA_VISIBLE_DEVICES=0,1,2,3 accelerate launch run_gimo.py --test_name=LSTM_Temporal --mode=train --config=example_config
   
     python run_gimo.py --test_name=lstm --mode=train --config=example_config
+=======
+'''
+	Start Command:
+	python run_gimo.py --test_name=Baseline --mode=train --config=example_config
+>>>>>>> 0cefc44b7dcebe23eec0d174651cf8a57cdd8f91
 '''
  
 logging.basicConfig(
@@ -96,6 +106,7 @@ class IMU2BodyNetwork(object):
 		self.build_network_gimo()
 		self.build_optimizer()
 
+<<<<<<< HEAD
 		self.accelerator = Accelerator()
 		print('accelerate is preparing')
   
@@ -105,6 +116,8 @@ class IMU2BodyNetwork(object):
 			self.dataloader[k] = self.accelerator.prepare(v)
 
 		print('accelerate is Ready')
+=======
+>>>>>>> 0cefc44b7dcebe23eec0d174651cf8a57cdd8f91
 
 	def set_info(self, pretrain=False):
 		is_train = True if self.mode == "train" else False
@@ -165,6 +178,7 @@ class IMU2BodyNetwork(object):
 
 		self.dataloader = {}
 
+<<<<<<< HEAD
 		data_root = self.config['data']['preprocess'] # NOTE: Hard code
 		if is_train is False:
 			data = np.load(self.directory + "mean_and_std.npz")
@@ -175,6 +189,9 @@ class IMU2BodyNetwork(object):
 			self.x_mean = x_data['mean']
 			self.x_std = x_data['std']
   
+=======
+		data_root = '/hpc2hdd/home/gzhang292/nanjie/project6/orion/group/GIMO' # NOTE: Hard code
+>>>>>>> 0cefc44b7dcebe23eec0d174651cf8a57cdd8f91
 		for fname in fnames:
 			if fname == "train":
 				is_train = True
@@ -265,7 +282,11 @@ class IMU2BodyNetwork(object):
 
 		self.model = imu2body.model.load_model(data_config=data_dict, model_config=model_dict)
 		self.model = self.model.to(self.device)
+<<<<<<< HEAD
 		#self.model = nn.DataParallel(self.model)
+=======
+		self.model = nn.DataParallel(self.model)
+>>>>>>> 0cefc44b7dcebe23eec0d174651cf8a57cdd8f91
 
 		self.model.zero_grad()
 		
@@ -285,7 +306,13 @@ class IMU2BodyNetwork(object):
 		model_dict = self.config['model']
 
 		self.model = imu2body.model.load_model(data_config=data_dict, model_config=model_dict)
+<<<<<<< HEAD
 		self.model.train()
+=======
+		self.model = self.model.to(self.device)
+		self.model = nn.DataParallel(self.model)
+
+>>>>>>> 0cefc44b7dcebe23eec0d174651cf8a57cdd8f91
 		self.model.zero_grad()
 		
 		self.criterion = nn.L1Loss()
@@ -330,7 +357,11 @@ class IMU2BodyNetwork(object):
 			with torch.no_grad():
 				input_seq = sampled_batch['input_seq'].to(self.device)
 
+<<<<<<< HEAD
 				output_tuple = self.model(input_seq) # ee, contact, output [256, 40, 31]
+=======
+				output_tuple = self.model(input_seq) # ee, contact, output
+>>>>>>> 0cefc44b7dcebe23eec0d174651cf8a57cdd8f91
 
 				results = self.loss_func(output_tuple=output_tuple, gt_tuple=sampled_batch, \
 			    						get_results=(mode == "test"), \
@@ -341,12 +372,20 @@ class IMU2BodyNetwork(object):
 					tgt_root = sampled_batch['global_p'][...,0,:]
 					tgt_rotations = sampled_batch['local_rot']
 
+<<<<<<< HEAD
 					rd = RenderData(gt_root=tgt_root[select_idx].detach().cpu().numpy(), \
+=======
+					rd = RenderData(gt_root=tgt_root[select_idx], \
+>>>>>>> 0cefc44b7dcebe23eec0d174651cf8a57cdd8f91
 					gt_rot=tgt_rotations[select_idx].detach().cpu().numpy(), \
 					output_root=output_root[select_idx].detach().cpu().numpy(),\
 					output_rot=output_joint_rot[select_idx].detach().cpu().numpy())
 
+<<<<<<< HEAD
 					start_T = sampled_batch['head_start'].detach().cpu().numpy()
+=======
+					start_T = sampled_batch['head_start']
+>>>>>>> 0cefc44b7dcebe23eec0d174651cf8a57cdd8f91
 					rd.convert_to_matrix(start_T=start_T[select_idx])
 
 					# reshape
@@ -389,9 +428,14 @@ class IMU2BodyNetwork(object):
 
 			steps_per_epoch = len(self.dataloader['train'])
 			for iterations, sampled_batch in enumerate(tqdm(self.dataloader['train'])):
+<<<<<<< HEAD
 				input_seq = sampled_batch['input_seq'].to(self.device) #[256, 40, 31]
 				input_img = sampled_batch['imgs'].to(self.device) #[256, 40, 3, H, W]
     
+=======
+				input_seq = sampled_batch['input_seq'].to(self.device) #[256,40,31]
+				
+>>>>>>> 0cefc44b7dcebe23eec0d174651cf8a57cdd8f91
 				# add noise
 				input_seq = input_seq + 0.01 * torch.randn(input_seq.shape).to(self.device)
 				output_tuple = self.model(input_seq) # hand (mid), foot, final_output (body)
@@ -462,6 +506,10 @@ class IMU2BodyNetwork(object):
 
 			return result_dict
 
+<<<<<<< HEAD
+=======
+
+>>>>>>> 0cefc44b7dcebe23eec0d174651cf8a57cdd8f91
 		root_diff = torch.abs(output_seq[...,:3] - tgt_seq[...,:3]) / self.x_std[...,0,:]
 
 		# add root rot
@@ -549,7 +597,10 @@ class IMU2BodyNetwork(object):
 
 if __name__ == "__main__":
 	parser = argparse.ArgumentParser()
+<<<<<<< HEAD
 	#parser.add_argument("--config_file", type=str, default="")
+=======
+>>>>>>> 0cefc44b7dcebe23eec0d174651cf8a57cdd8f91
 	parser.add_argument("--test_name", type=str, default="")
 	parser.add_argument("--mode", type=str, default="", choices=["test", "train", "custom"])
 	parser.add_argument("--config", type=str, default="")

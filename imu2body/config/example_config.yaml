@@ -1,5 +1,9 @@
 data:
+<<<<<<< HEAD
     preprocess: /home/zhanggangjian/nanjie/project6/orion/group/GIMO # Change to your path
+=======
+    preprocess: ../data/amass_dataset_processed
+>>>>>>> 0cefc44b7dcebe23eec0d174651cf8a57cdd8f91
 
 model:
     hidden_dim1: 1280 

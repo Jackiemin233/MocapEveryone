@@ -30,7 +30,11 @@ class IMU2BodyModel(nn.Module):
             output_dim=mid_dim,
             hidden_dim=model_config['hidden_dim1'],
             num_heads=model_config['num_head1'],
+<<<<<<< HEAD
             temporal=self.temporal
+=======
+            temporal=True
+>>>>>>> 0cefc44b7dcebe23eec0d174651cf8a57cdd8f91
         )
 
         # imu + head + ee pose -> contact, output
@@ -40,7 +44,11 @@ class IMU2BodyModel(nn.Module):
             hidden_dim=model_config['hidden_dim2'],
             num_heads=model_config['num_head2'],
             estimate_contact=True,
+<<<<<<< HEAD
             temporal=self.temporal
+=======
+            temporal=False
+>>>>>>> 0cefc44b7dcebe23eec0d174651cf8a57cdd8f91
         )
 
     def init_weights(self):
