@@ -144,11 +144,6 @@ def create_motion_from_gimo_data(filename, bm, transform_info = None, transform_
 			trans_list = []
 			for i in range(n):
 				f = filename[i]
-				# ori = np.load(f, allow_pickle=True)['orient'].detach().cpu().numpy()
-				# trans = np.load(f, allow_pickle=True)['trans'].detach().cpu().numpy()#.reshape((3, 1))
-				# ori_list.append(torch.from_numpy(ori).unsqueeze(0))
-				# trans_list.append(torch.from_numpy(trans).unsqueeze(0))
-    
 				ori = np.load(f, allow_pickle=True)['orient'].detach().cpu().numpy()
 				trans = np.load(f, allow_pickle=True)['trans'].detach().cpu().numpy().reshape((3, 1))    
 				R = Rotation.from_rotvec(ori).as_matrix()
