@@ -1,5 +1,5 @@
 data:
-    preprocess: ../data/amass_dataset_processed
+    preprocess: /home/zhanggangjian/nanjie/project6/orion/group/GIMO # Change to your path
 
 model:
     hidden_dim1: 1280 
@@ -8,8 +8,12 @@ model:
     num_head2: 10
     sep_encoder: True 
     # Ours
-    temporal_model: True
-    hand_estimator: True
+    temporal_model: True # Done
+    visual_input : False # TBD
+    hand_estimator: False
+    environment_enc: False
+
+    hidden_dim_scene: 1280
     
 train:
     batch_size: 256 #256

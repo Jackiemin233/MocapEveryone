@@ -43,7 +43,7 @@ from accelerate import Accelerator
  
  	NCCL_P2P_DISABLE=1 CUDA_VISIBLE_DEVICES=0,1,2,3 accelerate launch run_gimo.py --test_name=LSTM_Temporal --mode=train --config=example_config
   
-    python run_gimo.py --test_name=lstm --mode=train --confi=example_config
+    python run_gimo.py --test_name=lstm --mode=train --config=example_config
 '''
  
 logging.basicConfig(
@@ -179,7 +179,7 @@ class IMU2BodyNetwork(object):
 			if fname == "train":
 				is_train = True
 				batch_size = self.config['train']['batch_size']
-				self.dataloader[fname] = get_loader_gimo(data_root=data_root, \
+				self.dataloader[fname] = get_loader_training(data_root=data_root, \
 														batch_size=batch_size, \
 														training=is_train)
 				self.mean = self.dataloader['train'].dataset.mean
@@ -195,7 +195,7 @@ class IMU2BodyNetwork(object):
 			else:
 				is_train = False
 				batch_size = self.config['train']['batch_size']
-				self.dataloader[fname] = get_loader_gimo(data_root=data_root, \
+				self.dataloader[fname] = get_loader_training(data_root=data_root, \
 														batch_size=batch_size, \
 														training=is_train)
     

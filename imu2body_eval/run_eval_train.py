@@ -143,8 +143,8 @@ class IMU2BodyNetworkEval(object):
 		self.x_mean = torch.from_numpy(self.x_mean).to(self.device).float()
 		self.x_std = torch.from_numpy(self.x_std).to(self.device).view(1, 1, motion_constants.NUM_JOINTS, 3).float()
 
-		self.eval_files = glob.glob(os.path.join(self.eval_test_directory, "*.pkl"))
-
+		self.eval_files_gimo = glob.glob(os.path.join(self.eval_test_directory, 'gimo_test', "*.pkl"))
+		self.eval_files_egobody = glob.glob(os.path.join(self.eval_test_directory, 'egobody_test', "*.pkl"))
 
 	def build_network(self):
 		logging.info(f"Loading model...")
@@ -175,9 +175,8 @@ class IMU2BodyNetworkEval(object):
 
 	def run_per_file(self, file_dict):
 		sampled_batch = file_dict
-
-		# create placeholder for pred pos, pred rot, gt pos and gt rot
 		total_length = sampled_batch['total_length']
+		# create placeholder for pred pos, pred rot, gt pos and gt rot
 		predicted_position = torch.zeros(size=(total_length, motion_constants.NUM_JOINTS, 3))
 		predicted_rot = torch.zeros(size=(total_length, motion_constants.NUM_JOINTS, 3, 3))
 		gt_position = torch.zeros(size=(total_length, motion_constants.NUM_JOINTS, 3))
@@ -208,9 +207,8 @@ class IMU2BodyNetworkEval(object):
 		# into single seq
 		batch, seq_len, J, _ = pred_pos_to_world.shape
 
-		# for idx, start_frame in enumerate(sampled_batch['start_frame']):
-		for idx, start_end in enumerate(sampled_batch['start_end']):
-			start_frame = int(start_end[0])
+		for idx, info in enumerate(sampled_batch['info']):
+			start_frame = int(info['start_end'][0])
 			predicted_position[start_frame:start_frame+seq_len] = pred_pos_to_world[idx]
 			predicted_rot[start_frame:start_frame+seq_len] = pred_rotmat[idx]
 			gt_position[start_frame:start_frame+seq_len] = gt_pos_to_world[idx]
@@ -224,7 +222,6 @@ class IMU2BodyNetworkEval(object):
 		gt_angle = torch.from_numpy(gt_angle_np).cuda().float()
 		gt_root_angle = gt_angle[...,0,:] 
 				
-
 		# after running iterations get numbers
 		upper_index = [3, 6, 9, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21]
 		lower_index = [0, 1, 2, 4, 5, 7, 8] # 10,11 is not considered in imus. (why? TIP does not have ankle joints)
@@ -254,36 +251,6 @@ class IMU2BodyNetworkEval(object):
 		eval_log['filename'] = filename
 		torch.cuda.empty_cache()
 
-		# convert to fairmotion for visualization -> comment out for running eval (num) makes it slow
-		# if self.save_dir != "" or self.load_vis:
-		# 	num_frames = total_length
-		# 	gt_T = np.zeros(shape=(num_frames, 22, 4, 4))
-		# 	output_T = np.zeros(shape=(num_frames, 22, 4, 4))
-
-		# 	gt_T[:,0,:3,3] = gt_position[:,0,:].clone().cpu().numpy()
-		# 	gt_T[:,:,:3,:3] = gt_rot.clone().cpu().numpy()
-
-		# 	output_T[:,0,:3,3] = predicted_position[:,0,:].clone().cpu().numpy()
-		# 	output_T[:,:,:3,:3] = predicted_rot.clone().cpu().numpy()
-		# 	# save results
-		# 	# save_filename = filename.replace(".npz", "").replace("_poses","").replace("/", "_")
-		# 	# save_filepath = os.path.join(self.save_dir, f"{save_filename}.pkl")
-
-		# 	# convert into fairmotion
-		# 	gt_motion = motion_classes.Motion.from_matrix(gt_T, skel=deepcopy(self.skel))
-		# 	output_motion = motion_classes.Motion.from_matrix(output_T, skel=deepcopy(self.skel))
-
-		# 	# dict
-		# 	save_dict = {}
-		# 	save_dict['gt_motion'] = gt_motion
-		# 	save_dict['output_motion'] = output_motion
-
-		# 	# with open(save_filepath, "wb") as file:
-		# 	# 	pickle.dump(save_dict, file)
-
-		# if self.load_vis:
-		# 	eval_log['motion'] = gt_motion, output_motion
-
 		return eval_log
 
 	def eval(self):
@@ -306,7 +273,7 @@ class IMU2BodyNetworkEval(object):
 		render_result_dict['idx'] = []
 		render_result_dict['motion'] = []
 
-		for filepath in tqdm(self.eval_files):
+		for filepath in tqdm(self.eval_files_gimo):
 			with open(filepath, "rb") as file:
 				file_dict = pickle.load(file)
 				file_dict.update({"filename": filepath})
@@ -322,13 +289,37 @@ class IMU2BodyNetworkEval(object):
 				self.eval_log[metric].append(eval_log_per_file[metric])
 		
 		print(f"Done.")
-		logging.info(f"-----------------------EVAL RESULT-----------------------------------------------")
+		logging.info(f"-----------------------GIMO EVAL RESULT-----------------------------------------------")
 		for metric in self.eval_metric:
 			if 'jitter' in metric:
 				continue
 			print(f"metric: {metric} value: {np.mean(np.array(self.eval_log[metric])) * metrics_coeffs[metric]:.2f}")
 		print(f"metric: jitter value: {np.mean(np.array(self.eval_log['pred_jitter'])) / np.mean(np.array(self.eval_log['gt_jitter'])):.2f}")
-		logging.info(f"----------------------------------------------------------------------------------")
+		logging.info(f"--------------------------------------------------------------------------------------")
+  
+		for filepath in tqdm(self.eval_files_egobody):
+			with open(filepath, "rb") as file:
+				file_dict = pickle.load(file)
+				file_dict.update({"filename": filepath})
+			eval_log_per_file = self.run_per_file(file_dict=file_dict)
+			if self.load_vis:
+				render_result_dict['motion'].append(eval_log_per_file['motion'])
+				render_result_dict['seq_len'].append(eval_log_per_file['motion'][0].num_frames())
+				render_result_dict['idx'].append(filepath)
+			if eval_log_per_file['filename'] in self.eval_log_by_filename:
+				embed()
+			self.eval_log_by_filename[eval_log_per_file['filename']] = eval_log_per_file
+			for metric in self.eval_metric:
+				self.eval_log[metric].append(eval_log_per_file[metric])
+		
+		print(f"Done.")
+		logging.info(f"-----------------------Egobody EVAL RESULT---------------------------------------------")
+		for metric in self.eval_metric:
+			if 'jitter' in metric:
+				continue
+			print(f"metric: {metric} value: {np.mean(np.array(self.eval_log[metric])) * metrics_coeffs[metric]:.2f}")
+		print(f"metric: jitter value: {np.mean(np.array(self.eval_log['pred_jitter'])) / np.mean(np.array(self.eval_log['gt_jitter'])):.2f}")
+		logging.info(f"--------------------------------------------------------------------------------------")
 
 		if self.load_vis:
 			return render_result_dict

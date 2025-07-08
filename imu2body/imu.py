@@ -101,6 +101,7 @@ def imu_from_global_T(global_T, joint_idx=None):
         joint_idx = motion_constants.imu_hand_joint_idx
     joint_global_rot = global_T[...,joint_idx,:3,:3]
     global_pos = global_T[...,:3,3]
+    #NOTE: Debug print(global_pos[0][0])
     joint_global_pos = global_pos[...,joint_idx,:]    
     joint_acc = _syn_acc(joint_global_pos)
 

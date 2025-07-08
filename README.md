@@ -20,13 +20,22 @@ Clone the repo and setup virtual environment.
 ```
 git clone https://github.com/jiyewise/MocapEvery.git
 cd MocapEvery
-conda create -n mocap_env python=3.8
+conda create -n mocap_env python=3.10
 conda activate mocap_env 
 ```
 
 All dependencies can be installed at once by the command below.
 ```
 zsh install_total.sh
+
+cd libraries
+git clone --recursive https://github.com/erikwijmans/Pointnet2_PyTorch
+cd Pointnet2_PyTorch
+# [IMPORTANT] comment these two lines of code:
+#   https://github.com/erikwijmans/Pointnet2_PyTorch/blob/master/pointnet2_ops_lib/pointnet2_ops/_ext-src/src/sampling_gpu.cu#L100-L101
+# [IMPORTANT] Also, you need to change l196-198 of file `[PATH-TO-VENV]/lib64/python3.10/site-packages/pointnet2_ops/pointnet2_modules.py` to `interpolated_feats = known_feats.repeat(1, 1, unknown.shape[1])`
+pip install -r requirements.txt
+pip install -e .
 ```
 Note that in this repo we use a modified version of the [FairMotion](https://github.com/facebookresearch/fairmotion) library. 
 
@@ -127,10 +136,23 @@ Download the real IMU signals `TotalCapture_Real_60FPS` from the TotalCapture da
 
 
 ### Training
-To train the motion estimation module, first preprocess the data with the following command.
+To train the motion estimation module, first you should download GIMO dataset and Egobody dataset and orgnize tham as follows:
+```
+|datasetroot
+|-GIMO
+|--bedroom0112
+|--bedroom0123
+|--...
+|-Egobody
+|--Eegocentric_color
+|--scene_mesh
+|--smplx_camera_wearer_test
+|--...
+```
+And download VPoser checkpoint and put them to the '...data/smpl_models/vposer_v1_0'. then preprocess the data with the following command. (This step is to decode processed SMPL latent training data from GIMO dataset)
 ```
 cd imu2body
-python3 preprocess.py --data-config-path=./data_config/ --base-dir=PATH_TO_AMASS --preprocess-path=PATH_TO_PREPROCESS_PATH 
+python3 preprocess_training.py --data-config-path=./data_config/ --base-dir=PATH_TO_DATAROOT--preprocess-path=PATH_TO_DATAROOT 
 ```
 Then, start training with the following command. (Example file is in `imu2body/config`.) Change to `preprocess: PATH_TO_PREPROCESS_PATH` in the config file. You can adjust other hyperparameters if needed.
 ```

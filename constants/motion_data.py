@@ -61,6 +61,64 @@ JOINT_NAMES = [
     "RightHand"
 ]
 
+SMPLX_JOINT_NAMES = [
+    "Hips",
+    "LeftUpLeg",
+    "RightUpLeg",
+    "Spine",
+    "LeftLeg",
+    "RightLeg",
+    "Spine1",
+    "LeftFoot",
+    "RightFoot",
+    "Spine2",
+    "LeftToe",
+    "RightToe",
+    "Neck",
+    "LeftShoulder",
+    "RightShoulder",
+    "Head",
+    "LeftArm",
+    "RightArm",
+    "LeftForeArm",
+    "RightForeArm",
+    "LeftHand",
+    "RightHand"
+    'Jaw',
+    'Left_eye',
+    'Right_eye',
+    'Left_index1',
+    'Left_index2',
+    'Left_index3',
+    'Left_middle1',
+    'Left_middle2',
+    'Left_middle3',
+    'Left_pinky1',
+    'Left_pinky2',
+    'Left_pinky3',
+    'Left_ring1',
+    'Left_ring2',
+    'Left_ring3',
+    'Left_thumb1',
+    'Left_thumb2',
+    'Left_thumb3',
+    'Right_index1',
+    'Right_index2',
+    'Right_index3',
+    'Right_middle1',
+    'Right_middle2',
+    'Right_middle3',
+    'Right_pinky1',
+    'Right_pinky2',
+    'Right_pinky3',
+    'Right_ring1',
+    'Right_ring2',
+    'Right_ring3',
+    'Right_thumb1',
+    'Right_thumb2',
+    'Right_thumb3'
+]
+
 EE_JOINTS = [
     "LeftHand",
     "RightHand",
@@ -70,11 +128,8 @@ EE_JOINTS = [
 ]
 
 FOOT_JOINTS = [
-    # "LeftHand",
-    # "RightHand",
     "LeftFoot",
     "RightFoot",
-    # "Head"
 ]
 
 # add to solve overfitting on foot
@@ -87,6 +142,38 @@ HAND_JOINTS = [
     "LeftHand",
     "RightHand",
 ]
+
+SMPLX_FINGER_JOINTS = [    
+    'Left_index1',
+    'Left_index2',
+    'Left_index3',
+    'Left_middle1',
+    'Left_middle2',
+    'Left_middle3',
+    'Left_pinky1',
+    'Left_pinky2',
+    'Left_pinky3',
+    'Left_ring1',
+    'Left_ring2',
+    'Left_ring3',
+    'Left_thumb1',
+    'Left_thumb2',
+    'Left_thumb3',
+    'Right_index1',
+    'Right_index2',
+    'Right_index3',
+    'Right_middle1',
+    'Right_middle2',
+    'Right_middle3',
+    'Right_pinky1',
+    'Right_pinky2',
+    'Right_pinky3',
+    'Right_ring1',
+    'Right_ring2',
+    'Right_ring3',
+    'Right_thumb1',
+    'Right_thumb2',
+    'Right_thumb3']
 
 NUM_JOINTS = len(JOINT_NAMES)
 
