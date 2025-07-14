@@ -44,6 +44,8 @@ from accelerate import Accelerator
  	NCCL_P2P_DISABLE=1 CUDA_VISIBLE_DEVICES=0,1,2,3 accelerate launch run_gimo.py --test_name=LSTM_Temporal --mode=train --config=example_config
   
     python run_gimo.py --test_name=lstm --mode=train --config=example_config
+    
+    python run_gimo_train.py --test_name=lstm --mode=train --config=example_config
 '''
  
 logging.basicConfig(
@@ -105,6 +107,11 @@ class IMU2BodyNetwork(object):
 			self.dataloader[k] = self.accelerator.prepare(v)
 
 		print('accelerate is Ready')
+		
+		# For test
+		self.eval_files_gimo = glob.glob(os.path.join(self.data_path, 'gimo_test', "*.pkl"))
+		self.eval_files_egobody = glob.glob(os.path.join(self.data_path, 'egobody_test', "*.pkl"))
+		self.eval_metric = ['mpjpe', 'root_mpjpe', 'mpjve', 'rootpe', 'pred_jitter', 'gt_jitter']
 
 	def set_info(self, pretrain=False):
 		is_train = True if self.mode == "train" else False
@@ -113,6 +120,7 @@ class IMU2BodyNetwork(object):
 		logging.info(f"Using device: {self.device}")
 		
 		# set information from config and args
+		self.num_epoch_eval	= self.config['eval']['num_epoch_eval']
 		self.save_frequency = self.config['train']['save_frequency']
 		self.set_skel_info() # load skeleton info (this is needed for train and test)
 		
@@ -205,7 +213,6 @@ class IMU2BodyNetwork(object):
 		self.x_mean = torch.from_numpy(self.x_mean).to(self.device)
 		self.x_std = torch.from_numpy(self.x_std).to(self.device).view(1, 1, motion_constants.NUM_JOINTS, 3)
  
-
 	def load_data(self):
 		is_train = False
 
@@ -224,7 +231,6 @@ class IMU2BodyNetwork(object):
 			self.x_mean = x_data['mean']
 			self.x_std = x_data['std']
    
-
 		for fname in fnames:
 			if fname == "train":
 				batch_size = self.config['train']['batch_size']
@@ -254,7 +260,6 @@ class IMU2BodyNetwork(object):
 		self.std = torch.from_numpy(self.std).to(self.device)
 		self.x_mean = torch.from_numpy(self.x_mean).to(self.device)
 		self.x_std = torch.from_numpy(self.x_std).to(self.device).view(1, 1, motion_constants.NUM_JOINTS, 3)
-
 
 	def build_network(self):
 
@@ -306,7 +311,6 @@ class IMU2BodyNetwork(object):
 			self.optimizer.load_state_dict(torch.load(os.path.join(self.model_dir + 'optimizer.pkl')))
 			logging.info("optimizer loaded")
 
-
 	def run(self, mode="test"):
 		logging.info(f"Testing model with mode: {mode} ...")
 
@@ -323,14 +327,16 @@ class IMU2BodyNetwork(object):
 		select_idx = 0
 		if mode == "test":
 			batch = self.config['test']['batch_size']
-			select_idx =  random.randint(0, batch-1)
+			select_idx = random.randint(0, batch-1)
 			print(f"selected index: {select_idx}")
 
 		for iterations, sampled_batch in enumerate(tqdm(self.dataloader[mode])):
 			with torch.no_grad():
 				input_seq = sampled_batch['input_seq'].to(self.device)
 				input_img = sampled_batch['imgs']#.to(self.device)
-				input_pc = sampled_batch['scene_points'].to(self.device)
+				input_pc = sampled_batch['scene_points']#.to(self.device)
+    
+				input_seq = (input_seq - self.mean.float()) / self.std.float()
 
 				output_tuple = self.model(input_seq, input_img=input_img, input_pc = input_pc) # ee, contact, output [256, 40, 31]
 
@@ -392,8 +398,9 @@ class IMU2BodyNetwork(object):
 			for iterations, sampled_batch in enumerate(tqdm(self.dataloader['train'])):
 				input_seq = sampled_batch['input_seq'].to(self.device) #[256, 40, 31]
 				input_img = sampled_batch['imgs']#.to(self.device)
-				input_pc = sampled_batch['scene_points'].to(self.device)
-    
+				input_pc = sampled_batch['scene_points']#.to(self.device)
+				
+				input_seq = (input_seq - self.mean.float()) / self.std.float()
 				# add noise
 				input_seq = input_seq + 0.01 * torch.randn(input_seq.shape).to(self.device)
 				output_tuple = self.model(input_seq, input_img = input_img, input_pc = input_pc) # hand (mid), foot, final_output (body)
@@ -407,10 +414,11 @@ class IMU2BodyNetwork(object):
 			
 			epoch_loss /= steps_per_epoch
 			self.run(mode="validation") 
+			if epoch % self.num_epoch_eval == 0:
+				self.eval()
 			self.save(epoch_loss, epoch)
 
 	def get_loss(self, output_tuple, gt_tuple, get_results=False, get_loss=True, is_eval=False):
-		# mid_output, foot_output, output_seq = output_tuple
 		mid_ee, contact_output, output_seq = output_tuple
 
 		batch, seq_len, _ = output_seq.shape
@@ -460,7 +468,6 @@ class IMU2BodyNetwork(object):
 			result_dict['pred_rot'] = output_joint_rot.clone()
 			result_dict['gt_pos'] = global_pos.clone()
 			result_dict['gt_rot'] = target_joint_rot.clone()
-
 			return result_dict
 
 		root_diff = torch.abs(output_seq[...,:3] - tgt_seq[...,:3]) / self.x_std[...,0,:]
@@ -512,6 +519,95 @@ class IMU2BodyNetwork(object):
 			self.loss_total += self.config['train']['loss_vel_weight'] * self.foot_vel_loss
 
 		return (output_root, transforms.rotation_6d_to_matrix(output_joint_rot)) if get_results else None
+
+	def get_loss_eval(self, output_tuple, gt_tuple, get_results=False, get_loss=True, is_eval=False):
+		mid_ee, contact_output, output_seq = output_tuple
+
+		batch, seq_len, _ = output_seq.shape
+
+		mid_seq = gt_tuple['mid_seq'].to(self.device)
+		tgt_seq = gt_tuple['tgt_seq'].to(self.device) # [batch, seq_len, dim]
+		global_pos = gt_tuple['global_p'].to(self.device)
+		root = gt_tuple['root'].to(self.device)
+		#gt_contact_label = gt_tuple['contact_label'].to(self.device)
+
+		output_root = output_seq[...,:3]
+		output_joint_rot = output_seq[...,3:]
+		output_joint_rot = output_joint_rot.reshape(batch, seq_len, -1, 6)
+		target_joint_rot = tgt_seq[...,3:].reshape(batch, seq_len, -1, 6)
+
+		output_joint_rotmat = transforms.rotation_6d_to_matrix(output_joint_rot)
+
+		if not get_loss:
+			return (output_root, transforms.rotation_6d_to_matrix(output_joint_rot)) if get_results else None
+
+		# compare pos & ee 
+		if self.skel_offset.shape[0] != batch:
+			output_pos_mat = rot_matrix_fk_tensor(output_joint_rotmat, output_root, self.skel_offset[0:batch], self.skel_parent)
+		else:
+			output_pos_mat = rot_matrix_fk_tensor(output_joint_rotmat, output_root, self.skel_offset, self.skel_parent)
+
+		if is_eval:
+			result_dict = {}
+			result_dict['pred_pos'] = output_pos_mat.clone().detach()
+			result_dict['pred_rot'] = output_joint_rot.clone().detach()
+			result_dict['gt_pos'] = global_pos.clone().detach()
+			result_dict['gt_rot'] = target_joint_rot.clone().detach()
+   
+			return result_dict
+		
+		change_mode_epoch = 40
+		root_diff = torch.abs(output_seq[...,:3] - tgt_seq[...,:3]) / self.x_std[...,0,:]
+
+		# add root rot
+		root_rot_diff = self.criterion(output_seq[...,3:9], tgt_seq[...,3:9])
+		self.root_mean_loss = torch.mean(root_diff) + root_rot_diff * 0.5
+		self.rotation_mse_loss = self.criterion(output_seq[...,3:], tgt_seq[...,3:])					
+
+		# pos related loss
+		pos_diff = torch.abs(global_pos - output_pos_mat) / self.x_std
+		ee_diff = pos_diff[...,self.ee_idx+self.leg_idx,:]
+		foot_diff = pos_diff[..., self.foot_idx,:] # output of the final layer
+		
+		self.pos_mean_loss = torch.mean(pos_diff)
+		self.ee_mean_loss = torch.mean(ee_diff)
+		self.foot_pos_loss = torch.mean(foot_diff)
+		
+		self.foot_vel_loss = None
+		if self.train_epoch > change_mode_epoch:
+			vel = global_pos[...,1:,:,:] - global_pos[...,:-1,:,:]
+			output_vel = output_pos_mat[...,1:,:,:] - output_pos_mat[...,:-1,:,:]
+			vel_diff = torch.abs(output_vel - vel)
+			vel_diff = torch.abs(output_vel - vel) / self.x_std
+			self.foot_vel_loss = torch.mean(vel_diff[...,self.foot_idx, :])
+
+		# mid ee 
+		mid_ee_reshape = mid_ee.reshape(batch, seq_len, -1, 3)
+		mid_seq_reshape = mid_seq.reshape(batch, seq_len, -1, 3)
+		mid_pos_diff = torch.abs(mid_ee_reshape - mid_seq_reshape) / self.x_std[...,self.mid_ee_idx,:]
+		self.mid_mean_loss = torch.mean(mid_pos_diff)
+
+		# est loss 
+		mid_est_diff = torch.abs(output_pos_mat[...,self.mid_ee_idx,:] - mid_ee_reshape) / self.x_std[...,self.mid_ee_idx,:]
+
+		self.est_loss = torch.mean(mid_est_diff)
+
+		# contact classifier loss
+		self.contact_loss = self.contact_criterion(contact_output, gt_contact_label)
+
+		self.loss_total = self.config['train']['loss_pos_weight'] * self.pos_mean_loss + \
+						self.config['train']['loss_foot_weight'] * self.foot_pos_loss + \
+						self.config['train']['loss_ee_weight'] * self.ee_mean_loss + \
+						self.config['train']['loss_mid_weight'] * self.mid_mean_loss + \
+						self.config['train']['loss_quat_weight'] * self.rotation_mse_loss + \
+						self.config['train']['loss_root_weight'] * self.root_mean_loss + \
+						self.config['train']['loss_est_weight'] * self.est_loss + \
+						self.config['train']['loss_contact_weight'] * self.contact_loss
+
+		if self.foot_vel_loss is not None:
+			self.loss_total += self.config['train']['loss_vel_weight'] * self.foot_vel_loss
+
+		return (output_root, transforms.rotation_6d_to_matrix(output_joint_rot)) if get_results else None
 		
 	def optimize(self):
 		self.optimizer.zero_grad()
@@ -545,6 +641,176 @@ class IMU2BodyNetwork(object):
 		logging.info(f"Current Epoch: {epoch} | "
 					 f"Current Loss: {epoch_loss} | "
 					 f"Best Loss: {self.loss_total_min}")
+  
+	def eval(self):
+		logging.info(f"Eval with testset ...")
+		self.teacher_forcing_ratio = 0
+		self.model.eval()
+
+		self.eval_log = {}
+		for metric in self.eval_metric:
+			self.eval_log[metric] = []
+		
+		count = 0
+		filenames = []
+		self.eval_log_by_filename = {}
+
+		render_result_dict = {}
+		render_result_dict['fps'] = 30.0
+		render_result_dict['seq_len'] = []
+		render_result_dict['idx'] = []
+		render_result_dict['motion'] = []
+
+		for i, filepath in tqdm(enumerate(self.eval_files_gimo)):
+			with open(filepath, "rb") as file:
+				file_dict = pickle.load(file)
+				file_dict.update({"filename": filepath})
+			if i == 0:
+				eval_log_per_file = self.run_per_file(file_dict=file_dict, save_name = 'gimo_eval.ply')
+			else: 
+				eval_log_per_file = self.run_per_file(file_dict=file_dict, save_name = None)
+			# if self.load_vis:
+			# 	render_result_dict['motion'].append(eval_log_per_file['motion'])
+			# 	render_result_dict['seq_len'].append(eval_log_per_file['motion'][0].num_frames())
+			# 	render_result_dict['idx'].append(filepath)
+			if eval_log_per_file['filename'] in self.eval_log_by_filename:
+				embed()
+			self.eval_log_by_filename[eval_log_per_file['filename']] = eval_log_per_file
+			for metric in self.eval_metric:
+				self.eval_log[metric].append(eval_log_per_file[metric])
+		
+		print(f"Done.")
+		logging.info(f"-----------------------GIMO EVAL RESULT-----------------------------------------------")
+		for metric in self.eval_metric:
+			if 'jitter' in metric:
+				continue
+			print(f"metric: {metric} value: {np.mean(np.array(self.eval_log[metric])) * metrics_coeffs[metric]:.2f}")
+		print(f"metric: jitter value: {np.mean(np.array(self.eval_log['pred_jitter'])) / np.mean(np.array(self.eval_log['gt_jitter'])):.2f}")
+		logging.info(f"--------------------------------------------------------------------------------------")
+  
+		for i, filepath in tqdm(enumerate(self.eval_files_egobody)):
+			with open(filepath, "rb") as file:
+				file_dict = pickle.load(file)
+				file_dict.update({"filename": filepath})
+			if i == 0:
+				eval_log_per_file = self.run_per_file(file_dict=file_dict, save_name = 'egobody_eval.ply')
+			else: 
+				eval_log_per_file = self.run_per_file(file_dict=file_dict, save_name = None)
+			# if self.load_vis:
+			# 	render_result_dict['motion'].append(eval_log_per_file['motion'])
+			# 	render_result_dict['seq_len'].append(eval_log_per_file['motion'][0].num_frames())
+			# 	render_result_dict['idx'].append(filepath)
+			if eval_log_per_file['filename'] in self.eval_log_by_filename:
+				embed()
+			self.eval_log_by_filename[eval_log_per_file['filename']] = eval_log_per_file
+			for metric in self.eval_metric:
+				self.eval_log[metric].append(eval_log_per_file[metric])
+		
+		print(f"Done.")
+		logging.info(f"-----------------------Egobody EVAL RESULT--------------------------------------------")
+		for metric in self.eval_metric:
+			if 'jitter' in metric:
+				continue
+			print(f"metric: {metric} value: {np.mean(np.array(self.eval_log[metric])) * metrics_coeffs[metric]:.2f}")
+		print(f"metric: jitter value: {np.mean(np.array(self.eval_log['pred_jitter'])) / np.mean(np.array(self.eval_log['gt_jitter'])):.2f}")
+		logging.info(f"--------------------------------------------------------------------------------------")
+  
+	def run_per_file(self, file_dict, save_name = None):
+		sampled_batch = file_dict
+		total_length = sampled_batch['total_length']
+		# create placeholder for pred pos, pred rot, gt pos and gt rot
+		predicted_position = torch.zeros(size=(total_length, motion_constants.NUM_JOINTS, 3))
+		predicted_rot = torch.zeros(size=(total_length, motion_constants.NUM_JOINTS, 3, 3))
+		gt_position = torch.zeros(size=(total_length, motion_constants.NUM_JOINTS, 3))
+		gt_rot = torch.zeros(size=(total_length, motion_constants.NUM_JOINTS, 3, 3))
+
+		input_seq = sampled_batch['input_seq'].to(self.device)
+  
+		# norm_input
+		input_seq = (input_seq - self.mean) / self.std 
+  
+		output_tuple = self.model(input_seq.float())
+  
+		results = self.get_loss_eval(output_tuple=output_tuple, gt_tuple=sampled_batch, \
+									get_results=False, \
+									get_loss=True, \
+									is_eval=True) 
+			
+		start_T = sampled_batch['head_start'].to(self.device) # Start pos
+
+		# get pred into world coord
+		pred_pos_to_world = start_T[...,:3,:3].to(self.device) @ results['pred_pos'].unsqueeze(-1)
+		pred_pos_to_world = pred_pos_to_world[...,0] + start_T[...,:3,3]
+		pred_rotmat = transforms.rotation_6d_to_matrix(results['pred_rot'])
+		pred_rotmat[...,0:1,:,:] = start_T[...,:3,:3] @ pred_rotmat[...,0:1,:,:]
+
+		# pred_pos_to_world = results['pred_pos'].unsqueeze(-1)
+		# pred_pos_to_world = pred_pos_to_world[...,0] 
+		# pred_rotmat = transforms.rotation_6d_to_matrix(results['pred_rot'])
+		# pred_rotmat[...,0:1,:,:] = pred_rotmat[...,0:1,:,:]
+
+		# get gt into world coord
+		gt_pos_to_world = start_T[...,:3,:3].to(self.device) @ results['gt_pos'].unsqueeze(-1)
+		gt_pos_to_world = gt_pos_to_world[...,0] + start_T[...,:3,3]
+		gt_rotmat = transforms.rotation_6d_to_matrix(results['gt_rot'])
+		gt_rotmat[...,0:1,:,:] = start_T[...,:3,:3] @ gt_rotmat[...,0:1,:,:]
+  
+		# gt_pos_to_world = results['gt_pos'].unsqueeze(-1)
+		# gt_pos_to_world = gt_pos_to_world[...,0]
+		# gt_rotmat = transforms.rotation_6d_to_matrix(results['gt_rot'])
+		# gt_rotmat[...,0:1,:,:] = gt_rotmat[...,0:1,:,:]
+	
+		if save_name != None:
+			save_two_pointclouds_with_colors(pred_pos_to_world.clone().detach().reshape((-1,22,3)), gt_pos_to_world.clone().detach().reshape((-1,22,3)), save_name)
+
+		# into single seq
+		batch, seq_len, J, _ = pred_pos_to_world.shape
+
+		for idx, info in enumerate(sampled_batch['info']):
+			start_frame = int(info['start_end'][0])
+			predicted_position[start_frame:start_frame+seq_len] = pred_pos_to_world[idx]
+			predicted_rot[start_frame:start_frame+seq_len] = pred_rotmat[idx]
+			gt_position[start_frame:start_frame+seq_len] = gt_pos_to_world[idx]
+			gt_rot[start_frame:start_frame+seq_len] = gt_rotmat[idx]
+
+		predicted_angle_np = conversions.R2A(predicted_rot.cpu().numpy())
+		predicted_angle = torch.from_numpy(predicted_angle_np).cuda().float()
+		predicted_root_angle = predicted_angle[...,0,:] 
+
+		gt_angle_np = conversions.R2A(gt_rot.cpu().numpy()) 
+		gt_angle = torch.from_numpy(gt_angle_np).cuda().float() 
+		gt_root_angle = gt_angle[...,0,:] 
+				
+		# after running iterations get numbers
+		upper_index = [3, 6, 9, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21]
+		lower_index = [0, 1, 2, 4, 5, 7, 8] # 10,11 is not considered in imus. (why? TIP does not have ankle joints)
+		hand_index = [20, 21]
+		foot_index = [7, 8]
+		eval_log = {}
+		for metric in self.eval_metric:
+			eval_metric = get_metric_function(metric)(
+					predicted_position,
+					predicted_angle,
+					predicted_root_angle,
+					gt_position,
+					gt_angle,
+					gt_root_angle,
+					upper_index,
+					lower_index,
+					hand_index,
+					foot_index,
+					fps=motion_constants.FPS,
+					root_rel=True
+				).cpu().numpy()
+			eval_log[metric] = eval_metric 
+		
+		# add filename
+		parts = sampled_batch['filename'].split('/')
+		filename = '/'.join(parts[-1:])
+		eval_log['filename'] = filename
+		torch.cuda.empty_cache()
+
+		return eval_log
 
 
 if __name__ == "__main__":

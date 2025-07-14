@@ -119,7 +119,7 @@ def create_skeleton_from_amass_bodymodel(bm, betas=None):
 	skel = motion_class.Skeleton(
 		v_up=np.array([0.0, 1.0, 0.0]),
         v_face=np.array([0.0, 0.0, 1.0]),
-        v_up_env=np.array([0.0, 1.0, 0.0]),
+        v_up_env=np.array([0.0, 0.0, 1.0]),
 	)
 	for i in range(num_joints):
 		skel.add_joint(joints[i], parent_joints[i])
@@ -204,11 +204,9 @@ def create_motion_from_gimo_data(filename, bm, transform_info = None, transform_
 					)
 				)
 			pose_data.append(T)
-		motion.add_one_frame(pose_data)
-	
-	if motion_constants.UP_AXIS == "y":
-		motion = motion_ops.rotate(motion, conversions.Ax2R(conversions.deg2rad(-90))) # match to y up axis
-
+		motion.add_one_frame(pose_data)	
+	# if motion_constants.UP_AXIS == "y":
+	# 	motion = motion_ops.rotate(motion, conversions.Ax2R(conversions.deg2rad(-90))) # match to y up axis
 	if fps % motion_constants.FPS == 0:
 		stride = int(fps / motion_constants.FPS)
 		motion_resampled = motion
@@ -279,8 +277,8 @@ def create_mesh_from_amass_data(filename, bm, default_beta=True):
 	import trimesh
 	for i in range(frame):
 		mesh = trimesh.Trimesh(vertices=vertices_seq[i], faces=faces, force_mesh=True, process=False)
-		rotate = conversions.Ax2R(conversions.deg2rad(-90)) # match to y up axis
-		mesh.apply_transform(conversions.R2T(rotate))
+		#rotate = conversions.Ax2R(conversions.deg2rad(-90)) # match to y up axis
+		#mesh.apply_transform(conversions.R2T(rotate))
 		mesh_seq.append(mesh)
 	return mesh_seq
 	
@@ -302,10 +300,6 @@ def create_tpose(bm_path, default_beta=True):
 	skel, offset = create_skeleton_from_amass_bodymodel(
 		bm, betas=betas
 	)
-		
-	# root_orient = bdata["poses"][:, :3]  # controls the global root orientation (frame, 3)
-	# pose_body = bdata["poses"][:, 3:66]  # controls body joint angles (frame, 63)
-	# trans = bdata["trans"][:, :3]  # controls root translation (frame, 3)
 	
 	root_orient = np.zeros(shape=(1,3))
 	pose_body = np.zeros(shape=(1,63))
@@ -332,11 +326,6 @@ def create_tpose(bm_path, default_beta=True):
 		mesh_seq.append(mesh)
 
 	motion = motion_class.Motion(skel=skel, fps=30)
-
-	# embed()
-
-	# if not load_motion:
-	#     return motion 
 	
 	num_joints = skel.num_joints()
 	parents = bm.kintree_table[0].long()[:num_joints]
@@ -360,16 +349,7 @@ def create_tpose(bm_path, default_beta=True):
 			pose_data.append(T)
 		motion.add_one_frame(pose_data)
 
-	# motion = motion_ops.rotate(motion, conversions.Ax2R(conversions.deg2rad(90))) # match to z up axis
-
 	return motion, mesh_seq, offset
-	# if motion_constants.UP_AXIS == "y":
-
-	# motion_resampled = motion_ops.resample(motion, fps=motion_constants.FPS) if fps != motion_constants.FPS else motion 
-	# motion_adjust_height, foot_offset = motion_ops.adjust_height(motion_resampled, height_axis=motion_constants.UP_AXIS)
-	
-	# return motion_adjust_height
-
 
 
 def load(file, bm=None, bm_path=None, load_motion=True, load_mesh=False):
@@ -405,11 +385,6 @@ if __name__ == "__main__":
 	for i in range(frame):
 		mesh = trimesh.Trimesh(vertices=vertices_seq[i], faces=faces, force_mesh=True, process=False)
 		mesh.export(f"smpl_test{i}.obj")
-	
-	#     rotate = conversions.Ax2R(conversions.deg2rad(-90)) # match to y up axis
-	#     mesh.apply_transform(conversions.R2T(rotate))
-	#     mesh_seq.append(mesh)
-	# return mesh_seq
 
 
 # import sys, os

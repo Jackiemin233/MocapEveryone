@@ -1,5 +1,5 @@
 data:
-    preprocess: /home/zhanggangjian/nanjie/project6/orion/group/GIMO # Change to your path
+    preprocess: /home/zhanggangjian/nanjie/project6/orion/group/ # Change to your path
 
 model:
     hidden_dim1: 1280 
@@ -8,7 +8,7 @@ model:
     num_head2: 10
     sep_encoder: True 
     # Ours
-    temporal_model: True # Done
+    temporal_model: False #True # Done
     visual_input : False # TBD
     hand_estimator: False
     environment_enc: False
@@ -16,7 +16,7 @@ model:
     hidden_dim_scene: 1280
     
 train:
-    batch_size: 256 #256
+    batch_size: 256
     loss_pos_weight: 1.5
     loss_quat_weight: 1.25
     loss_root_weight: 1.0
@@ -27,7 +27,7 @@ train:
     loss_mid_weight: 1.0
     loss_est_weight: 0.3
     loss_contact_weight: 0.3
-    num_epoch: 40
+    num_epoch: 200
     lr_decay: 0.9993
     pretrained: ''
     save_frequency: 4
@@ -37,3 +37,6 @@ train:
 test:
     batch_size: 128
     num_epoch: 1
+
+eval:
+    num_epoch_eval: 5 # every 5 epoch eval

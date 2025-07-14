@@ -93,7 +93,7 @@ def load_data_from_gimo_eval(base_dir, file_list, idx, start_end=None):
 
 	# constants
 	window = motion_constants.preprocess_window
-	offset = motion_constants.preprocess_offset
+	offset = motion_constants.preprocess_window
 	height_indice = 1 if motion_constants.UP_AXIS == "y" else 2
 
 	for motion in tqdm(motion_list):
@@ -393,7 +393,7 @@ def load_data_from_amass(base_dir, file_list, save_path, debug=False):
 		with open(os.path.join(save_path_per_file, f"{idx}.pkl"), "wb") as file:
 			pickle.dump(result_dict, file, protocol=pickle.HIGHEST_PROTOCOL)
    
-def load_data_from_training(base_dir, file, debug=False, Normalization = False):
+def load_data_from_training(base_dir, file, debug=False, normlization = False):
 	motion_list = []
 	data_set_info = []
  
@@ -402,8 +402,10 @@ def load_data_from_training(base_dir, file, debug=False, Normalization = False):
 		filepath_list = [os.path.join(base_dir, 'GIMO', seq['fname'], 'smplx_local', file) for file in seq['file']]
 		transform_info = json.load(open(os.path.join(base_dir, 'GIMO', seq['fname'], seq['transform']), 'r')) # pose to scene transformation
 		transform_norm = np.loadtxt(os.path.join(base_dir, 'GIMO', seq['fname'], '../', 'scene_obj', 'transform_norm.txt')).reshape((4, 4))
+		start, end = seq['start_end'][0], seq['start_end'][1]
 		# scene (pose) normalization transformation
-		pkl_files = [f for f in filepath_list if f.endswith('.pkl')]
+		pkl_files = [f for f in filepath_list if f.endswith('.pkl')][start:end]
+
 	elif seq['dataset'] == 'egobody':
 		pkl_files = [os.path.join(base_dir, 'Egobody_dataset', f"smplx_camera_wearer_{seq['mode']}", seq['fname'], seq['body_index'], 'results', file, '000.pkl') for file in seq['file']]
 		transform_info = None
@@ -435,7 +437,7 @@ def load_data_from_training(base_dir, file, debug=False, Normalization = False):
 	else:
 		raise NotImplementedError("Only smplx are supported!")
 
-	logging.info(f"Done converting GIMO into fairmotion Motion class")
+	logging.info(f"Done converting {seq['dataset']} into fairmotion Motion class")
 
 	# read list
 	local_T = [] 
@@ -456,7 +458,7 @@ def load_data_from_training(base_dir, file, debug=False, Normalization = False):
 
 	# constants
 	window = motion_constants.preprocess_window
-	offset = motion_constants.preprocess_offset
+	offset = motion_constants.preprocess_window
 	height_indice = 1 if motion_constants.UP_AXIS == "y" else 2
 
 	for motion, info in tqdm(zip(motion_list, data_set_info)):
@@ -473,11 +475,13 @@ def load_data_from_training(base_dir, file, debug=False, Normalization = False):
 		contact[contact_frame] = height_offset 
 
 		# split into sliding windows
-		start_frame, end_frame = info['start_end'][0], info['start_end'][1]
+		start_frame, end_frame = 0, info['start_end'][1] - info['start_end'][0]
 		i = start_frame
 		while True:
-			if i+window > end_frame:
+			if i >= end_frame:
 				break
+			if i+window >= motion_local_T.shape[0]:
+				i = motion_local_T.shape[0] - window
 			else:
 				local_T_window = motion_local_T[i: i+window]
 				global_T_window = motion_global_T[i: i+window]
@@ -494,7 +498,7 @@ def load_data_from_training(base_dir, file, debug=False, Normalization = False):
 			imu_rot.append(imu_rot_window)
 			imu_acc.append(imu_acc_window)
 			info_list.append({
-				'start_end': np.array([i-start_frame, i+window-start_frame]),
+				'start_end': np.array([i, i+window]),
 				'seq': info['fname'],
 				'scene': info['scene'],
 				'dataset': info['dataset'],
@@ -508,12 +512,13 @@ def load_data_from_training(base_dir, file, debug=False, Normalization = False):
 	imu_acc = np.asarray(imu_acc).astype(dtype=np.float32)
 
 	head_idx = skel.get_index_joint("Head")
+ 
 	if info['dataset'] == 'gimo':
 		upvec_axis = np.array([0,0,0]).astype(dtype=np.float32)
-		upvec_axis[2] = 1.0
+		upvec_axis[1] = 1.0
 	elif info['dataset'] == 'egobody':
 		upvec_axis = np.array([0,0,0]).astype(dtype=np.float32)
-		upvec_axis[2] = 1.0
+		upvec_axis[1] = 1.0
 	
 	head_upvec = np.einsum('ijkl,l->ijk', global_T[..., head_idx,:3,:3], upvec_axis) # fixed bug! 
 	head_height = global_T[..., head_idx, height_indice, 3][..., np.newaxis]
@@ -522,10 +527,10 @@ def load_data_from_training(base_dir, file, debug=False, Normalization = False):
 	head_start_T = global_T[:,0:1,head_idx:head_idx+1,...] # [# window, 1, 1, 4, 4]
 	batch, seq_len, num_joints, _, _ = local_T.shape
 	head_invert = invert_T(head_start_T)
-	local_T[...,0:1,:,:] = head_invert @ local_T[...,0:1,:,:] # only adjust root
-
-	if Normalization == True:
+	
+	if normlization == True:
 		#loop to save ram space..
+		local_T[...,0:1,:,:] = head_invert @ local_T[...,0:1,:,:] # only adjust root
 		normalized_global_T = np.zeros(shape=global_T.shape)
 		for i in range(seq_len):
 			g_t = head_invert @ global_T[:,i:i+1,...]
@@ -535,7 +540,7 @@ def load_data_from_training(base_dir, file, debug=False, Normalization = False):
 		normalized_global_T = global_T
 
 	# imu & head input
-	if Normalization == True:
+	if normlization == True:
 		head_invert_rot = head_invert[...,:3,:3] 
 		normalized_imu_rot = head_invert_rot @ imu_rot  # [Window #, seq, 2, 3, 3]
 		normalized_imu_acc = np.einsum('ijklm,ijkm->ijkl', head_invert_rot, imu_acc) # [Window #, seq, 2, 3]
@@ -544,7 +549,7 @@ def load_data_from_training(base_dir, file, debug=False, Normalization = False):
 
 	else:
 		normalized_imu_rot = imu_rot  # [Window #, seq, 2, 3, 3]
-		normalized_imu_acc = imu_acc # [Window #, seq, 2, 3]
+		normalized_imu_acc = imu_acc  # [Window #, seq, 2, 3]
 		normalized_imu_concat = T_to_6d_and_pos(conversions.Rp2T(normalized_imu_rot, normalized_imu_acc)) # [Window #, seq, 2, 9]
 		normalized_imu_concat = normalized_imu_concat.reshape(batch, seq_len, -1)
 
@@ -674,7 +679,7 @@ def load_filelist(args):
 		os.makedirs(os.path.join(args.save_path, 'gimo_test'), exist_ok=True)
 		os.makedirs(os.path.join(args.save_path, 'egobody_test'), exist_ok=True)
 		for file in file_lists:
-			load_data_from_training(base_dir = args.base_dir, file = file)
+			load_data_from_training(base_dir = args.base_dir, file = file, normlization = True)
 
 
 if __name__ == "__main__":

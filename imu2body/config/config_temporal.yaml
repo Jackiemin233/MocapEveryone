@@ -11,7 +11,7 @@ model:
     hand_estimator: False
     
 train:
-    batch_size: 256 #256
+    batch_size: 64 #256
     loss_pos_weight: 1.5
     loss_quat_weight: 1.25
     loss_root_weight: 1.0

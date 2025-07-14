@@ -177,7 +177,7 @@ SMPLX_FINGER_JOINTS = [
 
 NUM_JOINTS = len(JOINT_NAMES)
 
-UP_AXIS = "z"
+UP_AXIS = "y"
 height_indice = 2 if UP_AXIS == "z" else 1
 import numpy as np
 plane = np.array([1,0,1]) if UP_AXIS == "y" else np.array([1,1,0])

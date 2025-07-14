@@ -45,11 +45,6 @@ logging.basicConfig(
 	level=logging.INFO,
 )
 
-"""
-python3 eval_by_files.py --data-config-path=./data_config/ --base-dir=/hpc2hdd/home/gzhang292/nanjie/project6/MocapEvery/data/amass_dataset_raw  --save-path=/hpc2hdd/home/gzhang292/nanjie/project6/MocapEvery/data/TotalCapture_dataset_processed --data-type=tc
-python3 run_eval.py --test_name=imu_pretrained --mode=test --eval-path=PATH_TO_SAVE_PREPROCESS_TC  
-"""
-
 bm_path = "../data/smpl_models/smplh/male/model.npz"
 
 
@@ -206,7 +201,7 @@ def load_data_from_amass(base_dir, file_list, save_path, debug=False):
 		normalized_imu_concat = T_to_6d_and_pos(conversions.Rp2T(normalized_imu_rot, normalized_imu_acc)) # [Window #, seq, 2, 9]
 		normalized_imu_concat = normalized_imu_concat.reshape(batch, seq_len, -1)
 
-		normalized_head = T_to_6d_and_pos(normalized_global_T[...,head_idx, :, :])
+		normalized_head = T_to_6d_and_pos(normalized_global_T[...,head_idx, :, :]) 
 		head_imu_input = np.concatenate((head_height, head_upvec, normalized_head, normalized_imu_concat), axis=-1) 
 
 		# mid (output of 1st network, input of 2nd network)
@@ -249,6 +244,8 @@ def load_data_from_amass(base_dir, file_list, save_path, debug=False):
 
 		with open(os.path.join(save_path_per_file, f"{idx}.pkl"), "wb") as file:
 			pickle.dump(result_dict, file, protocol=pickle.HIGHEST_PROTOCOL)
+
+
 
 def load_filelist(args):
 	test_txt_filename = ""

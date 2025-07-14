@@ -218,8 +218,8 @@ class IMU2BodyNetworkEval(object):
 		predicted_angle = torch.from_numpy(predicted_angle_np).cuda().float()
 		predicted_root_angle = predicted_angle[...,0,:] 
 
-		gt_angle_np = conversions.R2A(gt_rot.cpu().numpy())
-		gt_angle = torch.from_numpy(gt_angle_np).cuda().float()
+		gt_angle_np = conversions.R2A(gt_rot.cpu().numpy()) 
+		gt_angle = torch.from_numpy(gt_angle_np).cuda().float() 
 		gt_root_angle = gt_angle[...,0,:] 
 				
 		# after running iterations get numbers
@@ -313,7 +313,7 @@ class IMU2BodyNetworkEval(object):
 				self.eval_log[metric].append(eval_log_per_file[metric])
 		
 		print(f"Done.")
-		logging.info(f"-----------------------Egobody EVAL RESULT---------------------------------------------")
+		logging.info(f"-----------------------Egobody EVAL RESULT--------------------------------------------")
 		for metric in self.eval_metric:
 			if 'jitter' in metric:
 				continue
@@ -357,7 +357,9 @@ class IMU2BodyNetworkEval(object):
 			result_dict['pred_rot'] = output_joint_rot.clone().detach()
 			result_dict['gt_pos'] = global_pos.clone().detach()
 			result_dict['gt_rot'] = target_joint_rot.clone().detach()
-
+			#save_two_pointclouds_with_colors(output_pos_mat[0].clone().detach().reshape((-1,22,3)), global_pos[0].clone().detach().reshape((-1,22,3)))
+			#save_two_pointclouds_with_colors(output_pos_mat.clone().detach().reshape((-1,22,3)), global_pos.clone().detach().reshape((-1,22,3)))
+   
 			return result_dict
 		
 		change_mode_epoch = 40

@@ -91,7 +91,7 @@ def load_data_from_gimo_eval(base_dir, file_list, idx, start_end=None):
 
 	# constants
 	window = motion_constants.preprocess_window
-	offset = motion_constants.preprocess_offset
+	offset = motion_constants.preprocess_window
 	height_indice = 1 if motion_constants.UP_AXIS == "y" else 2
 
 	for motion in tqdm(motion_list):
@@ -391,8 +391,6 @@ def load_data_from_amass(base_dir, file_list, save_path, debug=False):
 
 		with open(os.path.join(save_path_per_file, f"{idx}.pkl"), "wb") as file:
 			pickle.dump(result_dict, file, protocol=pickle.HIGHEST_PROTOCOL)
-   
-
 
 def load_filelist(args):
 	test_txt_filename = ""

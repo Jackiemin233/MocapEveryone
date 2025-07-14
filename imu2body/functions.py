@@ -19,6 +19,8 @@ import pickle
 import datetime
 from fairmotion.ops import conversions, math, motion as motion_ops
 
+import open3d as o3d
+
 # convert to motion
 def convert_motion(T, skel, translate_offset=None):
 	# embed()
@@ -794,3 +796,30 @@ def extract_feet_contacts(pos, lfoot_idx, rfoot_idx, velfactor=0.02):
     contacts_r = np.concatenate([contacts_r, contacts_r[-1:]], axis=0)
 
     return contacts_l, contacts_r
+
+def save_two_pointclouds_with_colors(pc1: torch.Tensor, pc2: torch.Tensor, filename: str = "colored_pointcloud.ply"):
+    assert pc1.shape == pc2.shape and pc1.ndim == 3, "Expected shape [180, 22, 3] for both tensors"
+    
+    # [180, 22, 3] -> [180*22, 3]
+    pc1_points = pc1.reshape(-1, 3).cpu().numpy()
+    pc2_points = pc2.reshape(-1, 3).cpu().numpy()
+
+    # 用红色标记 pc1, 蓝色标记 pc2
+    red_color = np.tile(np.array([[1.0, 0.0, 0.0]]), (pc1_points.shape[0], 1))
+    blue_color = np.tile(np.array([[0.0, 0.0, 1.0]]), (pc2_points.shape[0], 1))
+
+    # 合并点云和颜色
+    all_points = np.concatenate([pc1_points, pc2_points], axis=0)
+    all_colors = np.concatenate([red_color, blue_color], axis=0)
+
+    # 创建 Open3D 点云对象
+    pcd = o3d.geometry.PointCloud()
+    pcd.points = o3d.utility.Vector3dVector(all_points)
+    pcd.colors = o3d.utility.Vector3dVector(all_colors)
+
+    # 写入文件
+    o3d.io.write_point_cloud(filename, pcd)
+    print(f"Saved point cloud to {filename}")
+
+    # 可视化（可选）
+    o3d.visualization.draw_geometries([pcd])

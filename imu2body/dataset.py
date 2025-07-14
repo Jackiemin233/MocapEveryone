@@ -318,7 +318,7 @@ def get_loader_training(
 	dataset = TrainingDataset(data_root, training)
 
 	data_loader = DataLoader(
-		dataset=dataset, batch_size=batch_size, shuffle=training, num_workers=16, drop_last=drop_last
+		dataset=dataset, batch_size=batch_size, shuffle=training, num_workers=8, drop_last=drop_last
 	)
 	return data_loader
 
@@ -365,7 +365,7 @@ def get_custom_loader(
 	dataset = CustomMotionData(motion_clip_path=motion_clip_path, device=device, custom_config=custom_config, mean=mean, std=std)
 
 	data_loader = DataLoader(
-		dataset=dataset, batch_size=1, shuffle=False, num_workers=8,  drop_last=False
+		dataset=dataset, batch_size=1, shuffle=False, num_workers=8, drop_last=False
 	)
 	return data_loader
 
@@ -435,8 +435,8 @@ class GIMODataset(data.Dataset):
         self.load_data_dict()
         
         global_p = self.imu_data['global_p']
-        x_mean = np.mean(global_p.reshape([global_p.shape[0], global_p.shape[1], -1]).transpose([0, 2, 1]), axis=(0, 2), keepdims=True)
-        x_std = np.std(global_p.reshape([global_p.shape[0], global_p.shape[1], -1]).transpose([0, 2, 1]), axis=(0, 2), keepdims=True)
+        x_mean = np.mean(global_p.reshape([global_p.shape[0], global_p.shape[1], -1]), axis=(0, 1), keepdims=True)
+        x_std = np.std(global_p.reshape([global_p.shape[0], global_p.shape[1], -1]), axis=(0, 1), keepdims=True)
         self.x_mean = x_mean
         self.x_std = x_std
 		
@@ -642,7 +642,7 @@ class TrainingDataset(data.Dataset):
         self.input_seq_len = 40
         self.output_seq_len = 40
         self.fps = 30
-        self.sample_points = 10000
+        self.sample_points = 600000
         self.sigma = 0.1
         self.img_size = 224
 
@@ -651,7 +651,7 @@ class TrainingDataset(data.Dataset):
         self.dataset_splitinfo_egobody = pd.read_csv(os.path.join(self.egobody_dataroot, 'data_split.csv'))
         
         self.parse_data_info()
-        self.load_scene()
+        #self.load_scene()
         self.load_imu()
 
         self.random_ori_list = [-180, -90, 0, 90]
@@ -664,16 +664,14 @@ class TrainingDataset(data.Dataset):
         self.load_data_dict()
         
         global_p = self.imu_data['global_p']
-        x_mean = np.mean(global_p.reshape([global_p.shape[0], global_p.shape[1], -1]).transpose([0, 2, 1]), axis=(0, 2), keepdims=True)
-        x_std = np.std(global_p.reshape([global_p.shape[0], global_p.shape[1], -1]).transpose([0, 2, 1]), axis=(0, 2), keepdims=True)
-        self.x_mean = x_mean
-        self.x_std = x_std
+        self.x_mean = np.mean(global_p.reshape([global_p.shape[0], global_p.shape[1], -1]).transpose([0, 2, 1]), axis=(0, 2), keepdims=True)
+        self.x_std = np.std(global_p.reshape([global_p.shape[0], global_p.shape[1], -1]).transpose([0, 2, 1]), axis=(0, 2), keepdims=True)
 		
 		# normalize 
         self.mean = np.mean(self.imu_data['input_seq'], axis=(0,1))
         self.std = np.std(self.imu_data['input_seq'], axis=(0,1))
  
-    def __getitem__(self, index):
+    def __getitem__(self, index, norm = False):
         input_seq = torch.from_numpy(self.imu_data['input_seq'][index]).float()
         mid_seq = torch.from_numpy(self.imu_data['mid_seq'][index]).float()
         tgt_seq = torch.from_numpy(self.imu_data['tgt_seq'][index]).float()
@@ -706,12 +704,12 @@ class TrainingDataset(data.Dataset):
             #     imgs.append(img_data)
             # imgs = torch.stack(imgs, dim=0)
             
-            scene_points = self.scene_list[seq.replace('/', '_')] # prepare scene pointcloud
-            scene_points = scene_points[np.random.choice(range(len(scene_points)), self.sample_points)]
-            scene_points = scene_points / scale
-            scene_points = (transform_norm[:3, :3] @ scene_points.T + transform_norm[:3, 3:]).T #
-            if self.mode == 'train':
-                scene_points += np.random.normal(loc=0, scale=self.sigma, size=scene_points.shape)
+            # scene_points = self.scene_list[seq.replace('/', '_')] # prepare scene pointcloud
+            # scene_points = scene_points[np.random.choice(range(len(scene_points)), self.sample_points)]
+            # scene_points = scene_points / scale
+            # scene_points = (transform_norm[:3, :3] @ scene_points.T + transform_norm[:3, 3:]).T #
+            # if self.mode == 'train':
+            #     scene_points += np.random.normal(loc=0, scale=self.sigma, size=scene_points.shape)
 
         elif info['dataset'] == 'egobody': # For Egobody dataset
             scene = info['scene']
@@ -730,13 +728,14 @@ class TrainingDataset(data.Dataset):
             #     imgs.append(img_data)
             # imgs = torch.stack(imgs, dim=0)
             
-            scene_points = self.scene_list['{}_{}'.format(scene, seq)] # prepare scene pointcloud
-            scene_points = scene_points[np.random.choice(range(len(scene_points)), self.sample_points)]
-            if self.mode == 'train':
-                scene_points += np.random.normal(loc=0, scale=self.sigma, size=scene_points.shape)
+            # scene_points = self.scene_list['{}_{}'.format(scene, seq)] # prepare scene pointcloud
+            # scene_points = scene_points[np.random.choice(range(len(scene_points)), self.sample_points)]
+            # if self.mode == 'train':
+            #     scene_points += np.random.normal(loc=0, scale=self.sigma, size=scene_points.shape)
         
-        # Load to input dict
+        # IMU related data
         input_ = {}
+        
         input_['input_seq'] = input_seq.float()
         input_['mid_seq'] = mid_seq.float()
         input_['tgt_seq'] = tgt_seq.float()
@@ -746,7 +745,7 @@ class TrainingDataset(data.Dataset):
         input_['local_rot'] = local_rot.float()
         input_['head_start'] = head_start.float()
 		# Scene Points
-        input_['scene_points'] =  torch.from_numpy(scene_points).float()
+        input_['scene_points'] = [] #torch.from_numpy(scene_points).float()
         # Input Images
         input_['imgs'] = imgs           
   
@@ -791,7 +790,7 @@ class TrainingDataset(data.Dataset):
         print('IMU information load done')
                  
     def load_data_dict(self):
-        data_sample = self.__getitem__(0)
+        data_sample = self.__getitem__(0, False)
         seq_len, input_seq_dim = data_sample['input_seq'].shape
         assert seq_len == motion_constants.preprocess_window, "seq length should be same as window size in preprocessing! check preprocess.py"
 
@@ -807,18 +806,14 @@ class TrainingDataset(data.Dataset):
         return self.dim_dict	
                 
     def load_scene(self):
-        self.scene_list = {}
+        self.scene_list = {} 
         for i, seq in enumerate(self.dataset_info_gimo['sequence_path']): # for GIMO
-            # if self.dataset_info_gimo['training'][i] != self.training: 
-            #     continue # ignore the test/validation
             scene = self.dataset_info_gimo['scene'][i]
             scene_ply = trimesh.load(os.path.join(self.gimo_dataroot, scene, 'scene_obj', 'scene_downsampled.ply'))
             scene_points = scene_ply.vertices
             self.scene_list['{}_{}'.format(scene, seq)] = scene_points
             
         for i, seq in enumerate(self.dataset_info_egobody['recording_name']): # for Egobody
-            # if (self.dataset_splitinfo_egobody[self.mode] == seq).any() != self.training: 
-            #     continue # ignore the test/validation
             scene = self.dataset_info_egobody['scene_name'][i]
             scene_ply = trimesh.load(os.path.join(self.egobody_dataroot, 'scene_mesh', scene, f'{scene}.obj'))
             scene_points = scene_ply.vertices
@@ -829,10 +824,20 @@ if __name__=="__main__":
 
 	data_root = '/home/zhanggangjian/nanjie/project6/orion/group/'
 	mode = 'train'
-	train_dataset = TrainingDataset(data_root, mode) # ['train', '']
-	data_sample = train_dataset[-1] 
+	train_dataset = TrainingDataset(data_root, mode) # ['train', 'test', 'val']
+	data_sample = train_dataset[-2] 
 	import trimesh
+	input_xyz = data_sample['input_seq'][..., 10:10+3].reshape(-1, 3)
 	Head_xyz = data_sample['global_p'].reshape(-1,3)
+	trimesh.Trimesh(input_xyz).export('/home/zhanggangjian/nanjie/head.obj')
 	trimesh.Trimesh(Head_xyz).export('/home/zhanggangjian/nanjie/test.obj')
-	trimesh.Trimesh(data_sample['scene_points']).export('/home/zhanggangjian/nanjie/test_scene.obj')
+	#trimesh.Trimesh(data_sample['scene_points']).export('/home/zhanggangjian/nanjie/test_scene.obj')
 	print('')
+ 
+ 	# data_root = '/home/zhanggangjian/nanjie/project6/orion/group/'
+	# mode = 'train'
+ 	# gimo_path = os.path.join(base_dir, 'GIMO')
+	# egobody_path = os.path.join(base_dir, 'Egobody_dataset')
+    
+    
+ 

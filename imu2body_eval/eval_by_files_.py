@@ -149,7 +149,6 @@ def load_data_from_training(base_dir, file_list, debug=False, Normalization = Fa
 			if not is_custom_run:
 				_, cur_height_offset = get_height_offset_current_frame(contact_dict=contact, cur_frame=i)
 				if abs(cur_height_offset) > 0:
-					# print(f"motion idx:{len(global_T)} i: {i} contact key: {_} height offset: {cur_height_offset}")
 					local_T_window_height_adjust[:,0,height_indice,3] -= cur_height_offset
 					global_T_window_height_adjust[...,height_indice,3] -= cur_height_offset
 

@@ -119,7 +119,7 @@ def create_skeleton_from_amass_bodymodel(bm, betas=None):
 	skel = motion_class.Skeleton(
 		v_up=np.array([0.0, 1.0, 0.0]),
         v_face=np.array([0.0, 0.0, 1.0]),
-        v_up_env=np.array([0.0, 1.0, 0.0]),
+        v_up_env=np.array([0.0, 0.0, 1.0]),
 	)
 	for i in range(num_joints):
 		skel.add_joint(joints[i], parent_joints[i])
