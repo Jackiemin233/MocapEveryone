@@ -393,7 +393,7 @@ def load_data_from_amass(base_dir, file_list, save_path, debug=False):
 		with open(os.path.join(save_path_per_file, f"{idx}.pkl"), "wb") as file:
 			pickle.dump(result_dict, file, protocol=pickle.HIGHEST_PROTOCOL)
    
-def load_data_from_training(base_dir, file, debug=False, normlization = False):
+def load_data_from_training(base_dir, file, setting = 'vr', debug=False, normalization = False):
 	motion_list = []
 	data_set_info = []
  
@@ -450,11 +450,12 @@ def load_data_from_training(base_dir, file, debug=False, normlization = False):
 	# slice_info list
 	info_list = []
 	
-	ee_joint_names = imu_constants.imu_joint_names + motion_constants.FOOT_JOINTS
-	ee_joint_idx = [skel.get_index_joint(jn) for jn in ee_joint_names]
-
-	imu_joint_names = imu_constants.imu_joint_names
-	imu_joint_idx = [skel.get_index_joint(jn) for jn in imu_joint_names]
+	if setting == 'vr':
+		ee_joint_names = imu_constants.imu_joint_names + motion_constants.FOOT_JOINTS
+		ee_joint_idx = [skel.get_index_joint(jn) for jn in ee_joint_names]
+	else:
+		ee_joint_names = motion_constants.FOOT_JOINTS
+		ee_joint_idx = [skel.get_index_joint(jn) for jn in ee_joint_names]
 
 	# constants
 	window = motion_constants.preprocess_window
@@ -528,7 +529,7 @@ def load_data_from_training(base_dir, file, debug=False, normlization = False):
 	batch, seq_len, num_joints, _, _ = local_T.shape
 	head_invert = invert_T(head_start_T)
 	
-	if normlization == True:
+	if normalization == True:
 		#loop to save ram space..
 		local_T[...,0:1,:,:] = head_invert @ local_T[...,0:1,:,:] # only adjust root
 		normalized_global_T = np.zeros(shape=global_T.shape)
@@ -540,7 +541,7 @@ def load_data_from_training(base_dir, file, debug=False, normlization = False):
 		normalized_global_T = global_T
 
 	# imu & head input
-	if normlization == True:
+	if normalization == True:
 		head_invert_rot = head_invert[...,:3,:3] 
 		normalized_imu_rot = head_invert_rot @ imu_rot  # [Window #, seq, 2, 3, 3]
 		normalized_imu_acc = np.einsum('ijklm,ijkm->ijkl', head_invert_rot, imu_acc) # [Window #, seq, 2, 3]
@@ -553,8 +554,14 @@ def load_data_from_training(base_dir, file, debug=False, normlization = False):
 		normalized_imu_concat = T_to_6d_and_pos(conversions.Rp2T(normalized_imu_rot, normalized_imu_acc)) # [Window #, seq, 2, 9]
 		normalized_imu_concat = normalized_imu_concat.reshape(batch, seq_len, -1)
 
-	normalized_head = T_to_6d_and_pos(normalized_global_T[...,head_idx, :, :]) # Head position 
-	head_imu_input = np.concatenate((head_height, head_upvec, normalized_head, normalized_imu_concat), axis=-1) 
+	if setting == 'vr':
+		normalized_lhand = T_to_6d_and_pos(normalized_global_T[..., skel.get_index_joint("LeftHand"),  :, :])
+		normalized_rhand = T_to_6d_and_pos(normalized_global_T[..., skel.get_index_joint("RightHand"), :, :])
+		normalized_head = T_to_6d_and_pos(normalized_global_T[..., head_idx, :, :]) # Head position + left and right hand
+		head_imu_input = np.concatenate((head_height, head_upvec, normalized_head, normalized_lhand, normalized_rhand), axis=-1) 
+	else: 
+		normalized_head = T_to_6d_and_pos(normalized_global_T[..., head_idx, :, :]) # Head position 
+		head_imu_input = np.concatenate((head_height, head_upvec, normalized_head, normalized_imu_concat), axis=-1) 
  
 	# mid (output of 1st network, input of 2nd network)
 	ee_pos = normalized_global_T[...,ee_joint_idx, :3, 3]	
@@ -679,7 +686,7 @@ def load_filelist(args):
 		os.makedirs(os.path.join(args.save_path, 'gimo_test'), exist_ok=True)
 		os.makedirs(os.path.join(args.save_path, 'egobody_test'), exist_ok=True)
 		for file in file_lists:
-			load_data_from_training(base_dir = args.base_dir, file = file, normlization = True)
+			load_data_from_training(base_dir = args.base_dir, file = file, normalization = True, setting = args.setting)
 
 
 if __name__ == "__main__":
@@ -705,7 +712,13 @@ if __name__ == "__main__":
 		"--data-type",
 		default='GIMO',
 		type=str,
-    	required=True
+		required=True
+	)
+	parser.add_argument(
+		"--setting",
+		type=str,
+		default ='vr',
+		choices = ['vr', 'hmc']
 	)
 
 	args = parser.parse_args()

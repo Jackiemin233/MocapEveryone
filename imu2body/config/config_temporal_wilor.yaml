@@ -9,10 +9,11 @@ model:
     sep_encoder: True 
     # Ours
     temporal_model: False #True # Done
+    wavelet_emb: True
     visual_input : False # TBD
     hand_estimator: False
     environment_enc: False
-
+    
     hidden_dim_scene: 1280
     
 train:

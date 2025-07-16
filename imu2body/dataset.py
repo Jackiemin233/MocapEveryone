@@ -671,7 +671,7 @@ class TrainingDataset(data.Dataset):
         self.mean = np.mean(self.imu_data['input_seq'], axis=(0,1))
         self.std = np.std(self.imu_data['input_seq'], axis=(0,1))
  
-    def __getitem__(self, index, norm = False):
+    def __getitem__(self, index):
         input_seq = torch.from_numpy(self.imu_data['input_seq'][index]).float()
         mid_seq = torch.from_numpy(self.imu_data['mid_seq'][index]).float()
         tgt_seq = torch.from_numpy(self.imu_data['tgt_seq'][index]).float()
@@ -790,7 +790,7 @@ class TrainingDataset(data.Dataset):
         print('IMU information load done')
                  
     def load_data_dict(self):
-        data_sample = self.__getitem__(0, False)
+        data_sample = self.__getitem__(0)
         seq_len, input_seq_dim = data_sample['input_seq'].shape
         assert seq_len == motion_constants.preprocess_window, "seq length should be same as window size in preprocessing! check preprocess.py"
 

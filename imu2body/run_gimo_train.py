@@ -45,7 +45,9 @@ from accelerate import Accelerator
   
     python run_gimo.py --test_name=lstm --mode=train --config=example_config
     
-    python run_gimo_train.py --test_name=lstm --mode=train --config=example_config
+    python run_gimo_train.py --test_name=VR_Baseline --mode=train --config=config_temporal_wilor
+    
+    python run_gimo_train.py --test_name=Debug_VR_wavelet --mode=train --config=config_temporal_wilor
 '''
  
 logging.basicConfig(
@@ -80,6 +82,7 @@ class IMU2BodyNetwork(object):
 
 		self.directory = directory
 		self.mode = args.mode
+		self.setting = args.setting
 		
 		# open config file
 		config_dir = "./config/"+args.config + ".yaml" if self.mode == "train" else self.directory + "config.yaml"
@@ -157,8 +160,10 @@ class IMU2BodyNetwork(object):
 		self.hand_idx = fairmotion_skel.get_index_joint(motion_constants.HAND_JOINTS)
 		# this is to solve overfitting on foot
 		self.leg_idx = fairmotion_skel.get_index_joint(motion_constants.LEG_JOINTS)
-
-		self.mid_ee_idx = self.hand_idx + fairmotion_skel.get_index_joint(motion_constants.FOOT_JOINTS)
+		if self.setting == 'vr':
+			self.mid_ee_idx = fairmotion_skel.get_index_joint(motion_constants.FOOT_JOINTS)
+		else:
+			self.mid_ee_idx = self.hand_idx + fairmotion_skel.get_index_joint(motion_constants.FOOT_JOINTS)
 		self.skel_offset = torch.from_numpy(self.skel_offset[np.newaxis, np.newaxis, ...]).to(self.device).float() 		# expand skel offset into tensor
 		if self.mode == "train":
 			self.skel_offset = self.skel_offset.repeat(self.config['train']['batch_size'], motion_constants.preprocess_window, 1, 1)
@@ -819,6 +824,7 @@ if __name__ == "__main__":
 	parser.add_argument("--test_name", type=str, default="")
 	parser.add_argument("--mode", type=str, default="", choices=["test", "train", "custom"])
 	parser.add_argument("--config", type=str, default="")
+	parser.add_argument("--setting", type=str, default="vr", choices = ['hmc', 'vr'])
 
 	args = parser.parse_args()
 	if not os.path.exists("./output/"):

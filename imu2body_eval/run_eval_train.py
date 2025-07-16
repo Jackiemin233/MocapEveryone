@@ -98,7 +98,7 @@ class IMU2BodyNetworkEval(object):
 		# set information from config and args
 		self.save_frequency = self.config['train']['save_frequency']
 		if 'eval' in self.config:
-			self.eval_metric = ['mpjpe', 'root_mpjpe', 'mpjve', 'rootpe', 'pred_jitter', 'gt_jitter']
+			self.eval_metric = ['mpjre', 'mpjpe', 'root_mpjpe', 'mpjve', 'rootpe', 'pred_jitter', 'gt_jitter']
 
 		self.set_skel_info()
 		
@@ -152,7 +152,7 @@ class IMU2BodyNetworkEval(object):
 
 		data_dict = {}
 		data_dict['input_dim'] = 31
-		data_dict['mid_dim'] = 12
+		data_dict['mid_dim'] = 6
 		data_dict['output_dim'] = 135
 
 		model_dict = self.config['model']

@@ -514,7 +514,7 @@ class PointNet(nn.Module):
 #         return x
 
 class WaveletEmbedding(nn.Module):
-    def __init__(self, d_channel=16, swt=True, requires_grad=False, wv='db2', m=2,
+    def __init__(self, d_channel=16, swt=True, requires_grad=True, wv='db2', m=2,
                  kernel_size=None):
         super().__init__()
 
@@ -560,8 +560,8 @@ class WaveletEmbedding(nn.Module):
             padding_r = (kernel_size * dilation) // 2
             pad = (padding - padding_r, padding_r)
             approx_coeffs_pad = F.pad(approx_coeffs, pad, "circular")
-            detail_coeff = F.conv1d(approx_coeffs_pad, h1, dilation=dilation, groups=x.shape[1])
-            approx_coeffs = F.conv1d(approx_coeffs_pad, h0, dilation=dilation, groups=x.shape[1])
+            detail_coeff = F.conv1d(approx_coeffs_pad, h1, dilation=dilation, groups=x.shape[1]) # Linear projection
+            approx_coeffs = F.conv1d(approx_coeffs_pad, h0, dilation=dilation, groups=x.shape[1]) # Apply Filter
             coeffs.append(detail_coeff)
             dilation *= 2
         coeffs.append(approx_coeffs)
@@ -589,13 +589,25 @@ class WaveletEmbedding(nn.Module):
         return approx_coeff
 
 
+# if __name__ == '__main__':
+#     '''
+#         Debug script for Environment encoder
+#     '''
+#     scene_pointnet = PointNet2SemSegSSGShape({'feat_dim': 1280}).cuda()
+#     x = torch.randn((1, 200000, 3)) 
+#     x = x.repeat((1, 1, 2)).cuda() 
+#     print(x.shape) 
+#     f1, f2 = scene_pointnet(x) 
+#     print(f1.shape, f2.shape) 
+
 if __name__ == '__main__':
     '''
-        Debug script for Environment encoder
+        Debug script for Wavelet encoder
     '''
-    scene_pointnet = PointNet2SemSegSSGShape({'feat_dim': 1280}).cuda()
-    x = torch.randn((1, 200000, 3)) 
-    x = x.repeat((1, 1, 2)).cuda() 
-    print(x.shape) 
-    f1, f2 = scene_pointnet(x) 
-    print(f1.shape, f2.shape) 
+    waveletdecomp = WaveletEmbedding(d_channel = 40, swt = True)
+    waveletrecon = WaveletEmbedding(d_channel = 40, swt = False)
+    
+    x = torch.randn((256, 40, 31))  # [b, c, h]
+    x_decomp = waveletdecomp(x)
+    x_recon = waveletrecon(x_decomp)
+    print(x_recon.shape)

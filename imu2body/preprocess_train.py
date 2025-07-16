@@ -45,7 +45,7 @@ smplh_bm_path = "../data/smpl_models/smplh/male/model.npz"
 
 CUR_BM_TYPE = "smplx"
 
-def load_data_from_training(base_dir, file_list, debug=False, normalization = False):
+def load_data_from_training(base_dir, file_list, setting = 'vr', debug=False, normalization = False):
 	motion_list = []
 	data_set_info = []
 	for seq in tqdm(file_list):
@@ -102,9 +102,12 @@ def load_data_from_training(base_dir, file_list, debug=False, normalization = Fa
  
 	# slice_info list
 	info_list = []
-	
-	ee_joint_names = imu_constants.imu_joint_names + motion_constants.FOOT_JOINTS
-	ee_joint_idx = [skel.get_index_joint(jn) for jn in ee_joint_names]
+	if setting == 'vr':
+		ee_joint_names = imu_constants.imu_joint_names + motion_constants.FOOT_JOINTS
+		ee_joint_idx = [skel.get_index_joint(jn) for jn in ee_joint_names]
+	else:
+		ee_joint_names = motion_constants.FOOT_JOINTS
+		ee_joint_idx = [skel.get_index_joint(jn) for jn in ee_joint_names]
 
 	imu_joint_names = imu_constants.imu_joint_names
 	imu_joint_idx = [skel.get_index_joint(jn) for jn in imu_joint_names]
@@ -222,14 +225,20 @@ def load_data_from_training(base_dir, file_list, debug=False, normalization = Fa
 		normalized_imu_concat = T_to_6d_and_pos(conversions.Rp2T(normalized_imu_rot, normalized_imu_acc)) # [Window #, seq, 2, 9]
 		normalized_imu_concat = normalized_imu_concat.reshape(batch, seq_len, -1)
 
-	else:
+	else: # IMU ROT AND ACC IS ONLY USED IN HMC SETTING/ For VR WE USE 3D Pos DIRECTLY
 		normalized_imu_rot = imu_rot  # [Window #, seq, 2, 3, 3]
 		normalized_imu_acc = imu_acc # [Window #, seq, 2, 3]
 		normalized_imu_concat = T_to_6d_and_pos(conversions.Rp2T(normalized_imu_rot, normalized_imu_acc)) # [Window #, seq, 2, 9]
 		normalized_imu_concat = normalized_imu_concat.reshape(batch, seq_len, -1)
 
-	normalized_head = T_to_6d_and_pos(normalized_global_T[..., head_idx, :, :]) # Head position 
-	head_imu_input = np.concatenate((head_height, head_upvec, normalized_head, normalized_imu_concat), axis=-1) 
+	if setting == 'vr':
+		normalized_lhand = T_to_6d_and_pos(normalized_global_T[..., skel.get_index_joint("LeftHand"),  :, :])
+		normalized_rhand = T_to_6d_and_pos(normalized_global_T[..., skel.get_index_joint("RightHand"), :, :])
+		normalized_head = T_to_6d_and_pos(normalized_global_T[..., head_idx, :, :]) # Head position + left and right hand
+		head_imu_input = np.concatenate((head_height, head_upvec, normalized_head, normalized_lhand, normalized_rhand), axis=-1) 
+	else: 
+		normalized_head = T_to_6d_and_pos(normalized_global_T[..., head_idx, :, :]) # Head position 
+		head_imu_input = np.concatenate((head_height, head_upvec, normalized_head, normalized_imu_concat), axis=-1) 
 	# [1, 3, 6+3]
  
 	# mid (output of 1st network, input of 2nd network)
@@ -251,15 +260,15 @@ def load_data_from_training(base_dir, file_list, debug=False, normalization = Fa
 	return head_imu_input, ee_pos_v, output, global_p, local_T[...,:3,:3], head_start_T, c_lr, info_list
 
 def load_data_with_args_train(file_list, args, mode = 'train'):
-    data, total_len = load_data(file_list, base_dir=args.base_dir, mode = mode)            
-    with open(os.path.join(args.preprocess_path, f"{mode}_wnorm.pkl"), "wb") as f_write:
+    data, total_len = load_data(file_list, base_dir=args.base_dir, setting=args.setting, mode = mode)            
+    with open(os.path.join(args.preprocess_path, f"{mode}_vr.pkl"), "wb") as f_write:
         pickle.dump(data, f_write, protocol=pickle.HIGHEST_PROTOCOL)
     logging.info(f"Saved {mode} data with {total_len} sequences in {os.path.join(args.preprocess_path, f'{mode}.pkl')}")
 
-def load_data(file_list_total, base_dir = "", mode = 'train'):
+def load_data(file_list_total, base_dir = "", setting = 'vr', mode = 'train'):
 	file_list = [f for f in file_list_total if f['mode'] == mode]
 
-	head_imu_input, ee_pos, output, global_p, local_rot, head_start, c_lr, info = load_data_from_training(base_dir, file_list, normalization=True)
+	head_imu_input, ee_pos, output, global_p, local_rot, head_start, c_lr, info = load_data_from_training(base_dir, file_list, setting = setting , normalization=True)
 
 	# set necessary information to dictionary
 	total, seq_len, _  = output.shape
@@ -355,7 +364,12 @@ if __name__ == "__main__":
 		type=str,
 		default=True
 	)
-	
+	parser.add_argument(
+		"--setting",
+		type=str,
+		default ='vr',
+		choices = ['vr', 'hmc']
+	)
 	args = parser.parse_args()
 	
 	# for generating preprocessed pkl files
