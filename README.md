@@ -143,7 +143,7 @@ To train the motion estimation module, first you should download GIMO dataset an
 |--bedroom0112
 |--bedroom0123
 |--...
-|-Egobody
+|-Egobody_dataset
 |--Eegocentric_color
 |--scene_mesh
 |--smplx_camera_wearer_test
