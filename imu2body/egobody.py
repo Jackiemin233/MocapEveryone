@@ -119,7 +119,7 @@ def create_skeleton_from_amass_bodymodel(bm, betas=None):
 	skel = motion_class.Skeleton(
 		v_up=np.array([0.0, 1.0, 0.0]),
         v_face=np.array([0.0, 0.0, 1.0]),
-        v_up_env=np.array([0.0, 0.0, 1.0]),
+        v_up_env=np.array([0.0, 1.0, 0.0]),
 	)
 	for i in range(num_joints):
 		skel.add_joint(joints[i], parent_joints[i])
@@ -210,7 +210,7 @@ def create_motion_from_egobody_data(filename, bm, transform_info = None, transfo
 		motion_resampled = motion_ops.resample(motion, fps=motion_constants.FPS)
 	elif fps == motion_constants.FPS:
 		motion_resampled = motion
-	motion_adjust_height, foot_offset = motion_ops.adjust_height(motion_resampled, height_axis=motion_constants.UP_AXIS, pivot=motion_constants.contact_pivot)
+	motion_adjust_height, foot_offset = motion_ops.adjust_height(motion_resampled, height_axis=motion_constants.UP_AXIS_EGOBODY, pivot=motion_constants.contact_pivot)
 	return motion_adjust_height
 
 	# motion_resampled = motion_ops.resample(motion, fps=motion_constants.FPS) if fps != motion_constants.FPS else motion 

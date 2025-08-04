@@ -103,10 +103,10 @@ def load_data_from_training(base_dir, file_list, setting = 'vr', debug=False, no
 	# slice_info list
 	info_list = []
 	if setting == 'vr':
-		ee_joint_names = imu_constants.imu_joint_names + motion_constants.FOOT_JOINTS
+		ee_joint_names = motion_constants.FOOT_JOINTS
 		ee_joint_idx = [skel.get_index_joint(jn) for jn in ee_joint_names]
 	else:
-		ee_joint_names = motion_constants.FOOT_JOINTS
+		ee_joint_names = motion_constants.FOOT_JOINTS + imu_constants.imu_joint_names
 		ee_joint_idx = [skel.get_index_joint(jn) for jn in ee_joint_names]
 
 	imu_joint_names = imu_constants.imu_joint_names
@@ -115,10 +115,11 @@ def load_data_from_training(base_dir, file_list, setting = 'vr', debug=False, no
 	# constants
 	window = motion_constants.preprocess_window
 	offset = motion_constants.preprocess_offset
-	height_indice = 1 if motion_constants.UP_AXIS == "y" else 2
- 
+	
 	is_custom_run = False
 	for motion, info in tqdm(zip(motion_list, data_set_info)):
+		height_indice = 1 if info['dataset'] == 'gimo' else 2 # y for GIMO and z for egobody
+     
 		if motion is None or motion.num_frames() < window:
 			continue
 		motion_local_T = motion.to_matrix()
@@ -211,7 +212,7 @@ def load_data_from_training(base_dir, file_list, setting = 'vr', debug=False, no
 		local_T[...,0:1,:,:] = head_invert @ local_T[...,0:1,:,:] # only adjust root
 		normalized_global_T = np.zeros(shape=global_T.shape)
 		for i in range(seq_len):
-			g_t = head_invert @ global_T[:,i:i+1,...]
+			g_t = head_invert @ global_T[:,i:i+1,...] 
 			normalized_global_T[:,i:i+1,...] = g_t
 		del global_T
 	else: 
@@ -261,7 +262,7 @@ def load_data_from_training(base_dir, file_list, setting = 'vr', debug=False, no
 
 def load_data_with_args_train(file_list, args, mode = 'train'):
     data, total_len = load_data(file_list, base_dir=args.base_dir, setting=args.setting, mode = mode)            
-    with open(os.path.join(args.preprocess_path, f"{mode}_vr.pkl"), "wb") as f_write:
+    with open(os.path.join(args.preprocess_path, f"{mode}.pkl"), "wb") as f_write:
         pickle.dump(data, f_write, protocol=pickle.HIGHEST_PROTOCOL)
     logging.info(f"Saved {mode} data with {total_len} sequences in {os.path.join(args.preprocess_path, f'{mode}.pkl')}")
 
@@ -339,7 +340,7 @@ def parse_filenames_and_load(args):
 		seqlists['mode'] = mode
 		seqlists['dataset'] = 'egobody'
 		file_lists.append(seqlists)
-  
+ 
 	load_data_with_args_train(file_list = file_lists, args=args, mode = 'train')
  
 	load_data_with_args_train(file_list = file_lists, args=args, mode = 'val')

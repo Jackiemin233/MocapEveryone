@@ -823,3 +823,36 @@ def save_two_pointclouds_with_colors(pc1: torch.Tensor, pc2: torch.Tensor, filen
 
     # 可视化（可选）
     o3d.visualization.draw_geometries([pcd])
+
+def xyz_to_transform_matrices(points):
+    """
+    将点云xyz坐标转换为变换矩阵格式
+    
+    参数:
+    points -- 形状为(N, 3)的numpy数组,包含N个点的xyz坐标
+    
+    返回:
+    形状为(N, 4, 4)的numpy数组, 每个4x4矩阵表示一个点的变换矩阵
+    """
+    n = points.shape[0]
+    
+    # 创建单位矩阵作为基础
+    transforms = np.tile(np.eye(4), (n, 1, 1))
+    
+    # 将xyz坐标设置到平移部分
+    transforms[:, :3, 3] = points
+    
+    return transforms
+
+def transform_matrices_to_xyz(transforms):
+    """
+    将变换矩阵格式转换回点云xyz坐标
+    
+    参数:
+    transforms -- 形状为(N, 4, 4)的numpy数组,每个4x4矩阵表示一个点的变换矩阵
+    
+    返回:
+    形状为(N, 3)的numpy数组,包含N个点的xyz坐标
+    """
+    # 直接从每个变换矩阵的平移部分提取xyz坐标
+    return transforms[:, :3, 3]

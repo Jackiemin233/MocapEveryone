@@ -17,6 +17,7 @@ from pytorch3d import transforms
 import constants.motion_data as motion_constants 
 from torch.utils.data import Dataset, DataLoader
 from interaction.contact import *
+from sklearn.neighbors import BallTree
 
 class MotionData(Dataset):
 	def __init__(self, dataset_path="", device="cuda", data=None, base_dir="", mean=None, std=None, debug=False):
@@ -416,7 +417,7 @@ class GIMODataset(data.Dataset):
         self.input_seq_len = 40
         self.output_seq_len = 40
         self.fps = 30
-        self.sample_points = 600000
+        self.sample_points = 20000
         self.sigma = 0.1
         self.img_size = 224
 
@@ -461,10 +462,9 @@ class GIMODataset(data.Dataset):
         img_list.sort()
 
         imgs = []
-        poses_input_idx = []
+        poses_input_idx = []    
 
-        random_ori = np.random.choice(self.random_ori_list)  # np.random.uniform(-self.config.random_angle, self.config.random_angle)
-        #random_rotation = Rotation.from_euler('xyz', [0, random_ori, 0], degrees=True).as_matrix()
+        random_ori = np.random.choice(self.random_ori_list)
         
         transform_info = json.load(open(os.path.join(self.dataroot, scene, seq, transform_path), 'r'))
         scale = transform_info['scale'] 
@@ -606,13 +606,10 @@ class GIMODataset(data.Dataset):
             if self.dataset_info['training'][i] != self.train: 
                 continue # ignore the test/validation
             scene = self.dataset_info['scene'][i]
-            #start_frame = self.dataset_info['start_frame'][i]
             scene_ply = trimesh.load(os.path.join(self.dataroot, scene, 'scene_obj', 'scene_downsampled.ply'))
-            # print(scene_ply.vertices.shape)
             scene_points = scene_ply.vertices
             self.scene_list['{}_{}'.format(scene, seq)] = scene_points
         print('Scene load done')
-        
         
 import torch.utils.data as data
 import torch
@@ -627,7 +624,7 @@ from tqdm import tqdm
 import pandas as pd
 import trimesh
 from scipy.spatial.transform import Rotation
-import bisect
+from imu2body.functions import invert_T, xyz_to_transform_matrices, transform_matrices_to_xyz
 
 class TrainingDataset(data.Dataset):
     def __init__(self, dataroot, mode='training'):
@@ -642,17 +639,18 @@ class TrainingDataset(data.Dataset):
         self.input_seq_len = 40
         self.output_seq_len = 40
         self.fps = 30
-        self.sample_points = 600000
+        self.sample_points = 60000
         self.sigma = 0.1
         self.img_size = 224
+        self.radius = 1.5
 
         self.dataset_info_gimo = pd.read_csv(os.path.join(self.gimo_dataroot, 'dataset.csv'))
         self.dataset_info_egobody = pd.read_csv(os.path.join(self.egobody_dataroot, 'data_info_release.csv'))
         self.dataset_splitinfo_egobody = pd.read_csv(os.path.join(self.egobody_dataroot, 'data_split.csv'))
         
         self.parse_data_info()
-        #self.load_scene()
         self.load_imu()
+        self.load_scene()
 
         self.random_ori_list = [-180, -90, 0, 90]
         self.transform = transforms.Compose([
@@ -670,6 +668,40 @@ class TrainingDataset(data.Dataset):
 		# normalize 
         self.mean = np.mean(self.imu_data['input_seq'], axis=(0,1))
         self.std = np.std(self.imu_data['input_seq'], axis=(0,1))
+        
+    def extract_points_in_radius(self,point_cloud, centers, radius, max_points_per_center=None):
+        assert centers.ndim == 2 and centers.shape[1] == 3, "中心点序列必须是 (N, 3) 形状"
+        
+        if max_points_per_center is None:
+            max_points_per_center = min(5000, len(point_cloud) // max(1, len(centers)))
+        
+        tree = BallTree(point_cloud, leaf_size=15, metric='euclidean')
+        
+        all_cropped = []
+        
+        for center in centers:
+            indices = tree.query_radius([center], r=radius)[0]
+            
+            if len(indices) == 0:
+                cropped = np.tile(center, (max_points_per_center, 1))  # 创建虚拟点
+            else:
+                cropped = point_cloud[indices]
+                
+                if len(cropped) > max_points_per_center:
+                    step = len(cropped) / max_points_per_center
+                    indices = (np.arange(max_points_per_center) * step).astype(int)
+                    cropped = cropped[indices]
+                
+                elif len(cropped) < max_points_per_center:
+                    repeat_count = max_points_per_center // len(cropped) + 1
+                    cropped = np.tile(cropped, (repeat_count, 1))
+                    cropped = cropped[:max_points_per_center]
+            
+            all_cropped.append(cropped)
+        
+        concatenated = np.vstack(all_cropped)
+        
+        return concatenated
  
     def __getitem__(self, index):
         input_seq = torch.from_numpy(self.imu_data['input_seq'][index]).float()
@@ -680,8 +712,10 @@ class TrainingDataset(data.Dataset):
         local_rot = torch.from_numpy(self.imu_data['local_rot'][index]).float()
         head_start = torch.from_numpy(self.imu_data['head_start'][index]).float()
         info = self.imu_data['info'][index]
-        start_frame, end_frame = int(info['start_end'][0]),  int(info['start_end'][1])
         
+        root_pose = self.imu_data['global_p'][index][:, 0]
+        start_frame, end_frame = int(info['start_end'][0]),  int(info['start_end'][1])
+
         if info['dataset'] == 'gimo': # For GIMO dataset
             scene = info['scene']
             seq = info['seq']
@@ -690,12 +724,7 @@ class TrainingDataset(data.Dataset):
             img_list.sort()
 
             imgs = []
-            poses_input_idx = []
-            transform_info = json.load(open(os.path.join(self.gimo_dataroot, seq, transform_path), 'r'))
-            scale = transform_info['scale'] 
-            transform_norm = np.loadtxt(os.path.join(self.gimo_dataroot, scene, 'scene_obj', 'transform_norm.txt')).reshape((4, 4))
-            transform_norm[:3, 3] /= scale
-            
+            # poses_input_idx = []
             # for f in range(self.input_seq_len): # prepare images
             #     pose_idx = start_frame + int(f * 30 / self.fps)
             #     poses_input_idx.append(pose_idx)
@@ -704,10 +733,21 @@ class TrainingDataset(data.Dataset):
             #     imgs.append(img_data)
             # imgs = torch.stack(imgs, dim=0)
             
-            # scene_points = self.scene_list[seq.replace('/', '_')] # prepare scene pointcloud
-            # scene_points = scene_points[np.random.choice(range(len(scene_points)), self.sample_points)]
-            # scene_points = scene_points / scale
-            # scene_points = (transform_norm[:3, :3] @ scene_points.T + transform_norm[:3, 3:]).T #
+            transform_info = json.load(open(os.path.join(self.gimo_dataroot, seq, transform_path), 'r'))
+            scale = transform_info['scale'] 
+            transform_norm = np.loadtxt(os.path.join(self.gimo_dataroot, scene, 'scene_obj', 'transform_norm.txt')).reshape((4, 4))
+            transform_norm[:3, 3] /= scale
+            
+            scene_points = self.scene_list[seq.replace('/', '_')] # prepare scene pointcloud
+            scene_points = scene_points[np.random.choice(range(len(scene_points)), self.sample_points)]
+            scene_points *= 1 / scale
+            scene_points = (transform_norm[:3, :3] @ scene_points.T + transform_norm[:3, 3:]).T
+            
+            head_invert = invert_T(head_start.numpy())
+            scene_points = (head_invert @ xyz_to_transform_matrices(scene_points))[0, :, :3, 3]
+            
+            scene_points = self.extract_points_in_radius(scene_points, root_pose, radius=self.radius)
+            
             # if self.mode == 'train':
             #     scene_points += np.random.normal(loc=0, scale=self.sigma, size=scene_points.shape)
 
@@ -719,7 +759,7 @@ class TrainingDataset(data.Dataset):
             img_list.sort()
             
             imgs = []
-            poses_input_idx = []
+            # poses_input_idx = []
             # for f in range(self.input_seq_len): # prepare images
             #     pose_idx = start_frame + int(f * 30 / self.fps)
             #     poses_input_idx.append(pose_idx)
@@ -728,12 +768,17 @@ class TrainingDataset(data.Dataset):
             #     imgs.append(img_data)
             # imgs = torch.stack(imgs, dim=0)
             
-            # scene_points = self.scene_list['{}_{}'.format(scene, seq)] # prepare scene pointcloud
-            # scene_points = scene_points[np.random.choice(range(len(scene_points)), self.sample_points)]
+            scene_points = self.scene_list['{}_{}'.format(scene, seq)] # prepare scene pointcloud
+            scene_points = scene_points[np.random.choice(range(len(scene_points)), self.sample_points)]
+            
+            head_invert = invert_T(head_start.numpy())
+            scene_points = (head_invert @ xyz_to_transform_matrices(scene_points))[0, :, :3, 3]
+            
+            scene_points = self.extract_points_in_radius(scene_points, root_pose, radius=self.radius) # Extract points in a radius of 1.0m
+            
             # if self.mode == 'train':
             #     scene_points += np.random.normal(loc=0, scale=self.sigma, size=scene_points.shape)
         
-        # IMU related data
         input_ = {}
         
         input_['input_seq'] = input_seq.float()
@@ -745,7 +790,7 @@ class TrainingDataset(data.Dataset):
         input_['local_rot'] = local_rot.float()
         input_['head_start'] = head_start.float()
 		# Scene Points
-        input_['scene_points'] = [] #torch.from_numpy(scene_points).float()
+        input_['scene_points'] = torch.from_numpy(scene_points).float()
         # Input Images
         input_['imgs'] = imgs           
   
@@ -822,17 +867,23 @@ class TrainingDataset(data.Dataset):
             
 if __name__=="__main__":
 
-	data_root = '/home/zhanggangjian/nanjie/project6/orion/group/'
+	data_root = '/home/yaonanjie/project6/orion/group/'
 	mode = 'train'
 	train_dataset = TrainingDataset(data_root, mode) # ['train', 'test', 'val']
-	data_sample = train_dataset[-2] 
+	data_sample = train_dataset[0]
 	import trimesh
-	input_xyz = data_sample['input_seq'][..., 10:10+3].reshape(-1, 3)
-	Head_xyz = data_sample['global_p'].reshape(-1,3)
-	trimesh.Trimesh(input_xyz).export('/home/zhanggangjian/nanjie/head.obj')
-	trimesh.Trimesh(Head_xyz).export('/home/zhanggangjian/nanjie/test.obj')
-	#trimesh.Trimesh(data_sample['scene_points']).export('/home/zhanggangjian/nanjie/test_scene.obj')
+	#input_xyz = data_sample['input_seq'][..., 10:10+3].reshape(-1, 3)
+	input_xyz = data_sample['global_p'].reshape(-1,3)
+	#trimesh.Trimesh(input_xyz).export('/home/zhanggangjian/nanjie/head.obj')
+	trimesh.Trimesh(input_xyz).export('/home/yaonanjie/test.obj')
+	trimesh.Trimesh(data_sample['scene_points']).export('/home/yaonanjie/test_scene.obj')
 	print('')
+
+	# from amass import load_body_model, create_mesh_from_output
+	# bm_path = "../data/smpl_models/smplx/SMPLX_NEUTRAL.npz"
+	# bm = load_body_model(bm_path=bm_path)
+	# tgt_seq = data_sample['tgt_seq'] # 40, 135
+	# vertices, faces = amass.create_mesh_from_output(tgt_seq, bm)
  
  	# data_root = '/home/zhanggangjian/nanjie/project6/orion/group/'
 	# mode = 'train'

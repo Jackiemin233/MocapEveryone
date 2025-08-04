@@ -114,7 +114,7 @@ class IMU2BodyNetwork(object):
 		# For test
 		self.eval_files_gimo = glob.glob(os.path.join(self.data_path, 'gimo_test', "*.pkl"))
 		self.eval_files_egobody = glob.glob(os.path.join(self.data_path, 'egobody_test', "*.pkl"))
-		self.eval_metric = ['mpjpe', 'root_mpjpe', 'mpjve', 'rootpe', 'pred_jitter', 'gt_jitter']
+		self.eval_metric = ['mpjre', 'mpjpe', 'root_mpjpe', 'mpjve', 'rootpe', 'pred_jitter', 'gt_jitter']
 
 	def set_info(self, pretrain=False):
 		is_train = True if self.mode == "train" else False
