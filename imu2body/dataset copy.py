@@ -8,24 +8,16 @@ import glob
 import numpy as np
 import pickle
 import torch
-import trimesh
-import pandas as pd
-import json
-import bisect
 from fairmotion.utils import constants
 from IPython import embed
 from imu2body.preprocess import load_data as load_amass_data
 from imu2body.preprocess_gimo import load_data as load_gimo_data
 # from preprocess_bvh import *
-from imu2body.functions import invert_T, xyz_to_transform_matrices, transform_matrices_to_xyz
-from torchvision import transforms as tv_transforms
-import torch.utils.data as data
+from pytorch3d import transforms
 import constants.motion_data as motion_constants 
 from torch.utils.data import Dataset, DataLoader
 from interaction.contact import *
 from sklearn.neighbors import BallTree
-import open3d as o3d
-from tqdm import tqdm
 
 class MotionData(Dataset):
     def __init__(self, dataset_path="", device="cuda", data=None, base_dir="", mean=None, std=None, debug=False):
@@ -327,7 +319,6 @@ def get_loader_training(
     dataset = TrainingDataset(data_root, training)
 
     data_loader = DataLoader(
-        # BUG num_workers
         dataset=dataset, batch_size=batch_size, shuffle=training, num_workers=8, drop_last=drop_last
     )
     return data_loader
@@ -402,6 +393,20 @@ def get_realdata_loader(
     )
     return data_loader
   
+import torch.utils.data as data
+import torch
+from torchvision import transforms
+import numpy as np
+import random
+import os
+import json
+import pickle
+from PIL import Image
+from tqdm import tqdm
+import pandas as pd
+import trimesh
+from scipy.spatial.transform import Rotation
+import bisect
 
 class GIMODataset(data.Dataset):
     def __init__(self, dataroot, train=False):
@@ -422,10 +427,10 @@ class GIMODataset(data.Dataset):
         self.load_imu()
 
         self.random_ori_list = [-180, -90, 0, 90]
-        self.transform = tv_transforms.Compose([
-            tv_transforms.Resize(self.img_size),
-            tv_transforms.ToTensor(),
-            tv_transforms.Normalize((0.485, 0.456, 0.406),
+        self.transform = transforms.Compose([
+            transforms.Resize(self.img_size),
+            transforms.ToTensor(),
+            transforms.Normalize((0.485, 0.456, 0.406),
                                  (0.229, 0.224, 0.225))
         ])
         self.load_data_dict()
@@ -601,59 +606,57 @@ class GIMODataset(data.Dataset):
             if self.dataset_info['training'][i] != self.train: 
                 continue # ignore the test/validation
             scene = self.dataset_info['scene'][i]
-            #start_frame = self.dataset_info['start_frame'][i]
             scene_ply = trimesh.load(os.path.join(self.dataroot, scene, 'scene_obj', 'scene_downsampled.ply'))
-            # print(scene_ply.vertices.shape)
             scene_points = scene_ply.vertices
             self.scene_list['{}_{}'.format(scene, seq)] = scene_points
         print('Scene load done')
         
-def fast_load_obj_vertices(path):
-    vertices = []
-    with open(path, 'r') as f:
-        for line in f:
-            if line.startswith('v '):  # 只读取顶点
-                parts = line.strip().split()
-                vertices.append([float(parts[1]), float(parts[2]), float(parts[3])])
-    return np.array(vertices)
+import torch.utils.data as data
+import torch
+from torchvision import transforms
+import numpy as np
+import random
+import os
+import json
+import pickle
+from PIL import Image
+from tqdm import tqdm
+import pandas as pd
+import trimesh
+from scipy.spatial.transform import Rotation
+from imu2body.functions import invert_T, xyz_to_transform_matrices, transform_matrices_to_xyz
 
 class TrainingDataset(data.Dataset):
-    def __init__(self, dataroot, mode='training', imu_path='./preprocess_train_vr_new'):    # BUG preprocess_train_vr_old
+    def __init__(self, dataroot, mode='training'):
         self.dataroot = dataroot
         self.gimo_dataroot = os.path.join(self.dataroot, 'GIMO') # for GIMO dataset
         self.egobody_dataroot = os.path.join(self.dataroot, 'Egobody_dataset') # for Egobody dataset
         self.mode = mode
         self.training = True if self.mode == 'train' else False
-        self.imu_path = os.path.join(imu_path, f'{mode}_vr.pkl')
+        self.imu_path = os.path.join(self.dataroot, f'{mode}.pkl')
 
         # NOTE: Hard coded
         self.input_seq_len = 40
         self.output_seq_len = 40
         self.fps = 30
-        self.scene_downsample_points = 60000
-        self.cxt_num_points = 1024          # NOTE ablation study required
+        self.sample_points = 60000
         self.sigma = 0.1
         self.img_size = 224
-        self.radius = 1.5                   # NOTE
+        self.radius = 1.5
 
         self.dataset_info_gimo = pd.read_csv(os.path.join(self.gimo_dataroot, 'dataset.csv'))
         self.dataset_info_egobody = pd.read_csv(os.path.join(self.egobody_dataroot, 'data_info_release.csv'))
         self.dataset_splitinfo_egobody = pd.read_csv(os.path.join(self.egobody_dataroot, 'data_split.csv'))
-        self.transform_scale_dict = {}  # 新增：缓存transform_
-        self.transform_norm_dict = {}  # 新增：缓存transform_norm
-        self.preprocessed_scene_dict = {}
-
         
         self.parse_data_info()
         self.load_imu()
         self.load_scene()
-        self._precompute_sampled_scene_points()
 
         self.random_ori_list = [-180, -90, 0, 90]
-        self.transform = tv_transforms.Compose([
-            tv_transforms.Resize(self.img_size),
-            tv_transforms.ToTensor(),
-            tv_transforms.Normalize((0.485, 0.456, 0.406),
+        self.transform = transforms.Compose([
+            transforms.Resize(self.img_size),
+            transforms.ToTensor(),
+            transforms.Normalize((0.485, 0.456, 0.406),
                                  (0.229, 0.224, 0.225))
         ])
         self.load_data_dict()
@@ -665,26 +668,8 @@ class TrainingDataset(data.Dataset):
         # normalize 
         self.mean = np.mean(self.imu_data['input_seq'], axis=(0,1))
         self.std = np.std(self.imu_data['input_seq'], axis=(0,1))
-
-    def downsample_point_cloud(self, points: np.ndarray, target_num: int) -> np.ndarray:
-        num_points = len(points)
-
-        if num_points == 0:
-            # 全部点为空，直接返回 zeros
-            return np.zeros((target_num, 3), dtype=np.float32)
-
-        if num_points >= target_num:
-            # 随机下采样
-            indices = np.random.choice(num_points, target_num, replace=False)
-            return points[indices]
-        else:
-            # BUG 不足，重复补齐
-            # print(f"Points {num_points} less than {target_num}")
-            repeat_count = target_num // num_points + 1
-            padded = np.tile(points, (repeat_count, 1))
-            return padded[:target_num]
-
-    def extract_points_in_radius(self, point_cloud, centers, radius, max_points_per_center=None):
+        
+    def extract_points_in_radius(self,point_cloud, centers, radius, max_points_per_center=None):
         assert centers.ndim == 2 and centers.shape[1] == 3, "中心点序列必须是 (N, 3) 形状"
         
         if max_points_per_center is None:
@@ -694,7 +679,7 @@ class TrainingDataset(data.Dataset):
         
         all_cropped = []
         
-        for center in centers[::20]:                # NOTE define scene points sample length to 10
+        for center in centers:
             indices = tree.query_radius([center], r=radius)[0]
             
             if len(indices) == 0:
@@ -715,34 +700,9 @@ class TrainingDataset(data.Dataset):
             all_cropped.append(cropped)
         
         concatenated = np.vstack(all_cropped)
-        _, unique_idx = np.unique(concatenated, axis=0, return_index=True)
-        concatenated = concatenated[unique_idx]
-
-        final_points = self.downsample_point_cloud(concatenated, self.cxt_num_points)
         
-        return final_points
-
-    def extract_points_in_bbox(self, point_cloud, centers, radius):
-        assert centers.ndim == 2 and centers.shape[1] == 3, "中心点序列必须是 (N, 3) 形状"
-        all_cropped = []
-        for center in centers[::20]:
-            lower = center - radius
-            upper = center + radius
-            mask = np.all((point_cloud >= lower) & (point_cloud <= upper), axis=1)
-            cropped = point_cloud[mask]
-            if len(cropped) > 0:
-                all_cropped.append(cropped)
-        if len(all_cropped) == 0:
-            # 没有采到点，直接用中心点补齐
-            concatenated = np.tile(centers[0], (self.cxt_num_points, 1))
-        else:
-            concatenated = np.vstack(all_cropped)
-            # 去重
-            concatenated = np.unique(concatenated, axis=0)
-        # 下采样
-        final_points = self.downsample_point_cloud(concatenated, self.cxt_num_points)
-        return final_points
-
+        return concatenated
+ 
     def __getitem__(self, index):
         input_seq = torch.from_numpy(self.imu_data['input_seq'][index]).float()
         mid_seq = torch.from_numpy(self.imu_data['mid_seq'][index]).float()
@@ -750,45 +710,75 @@ class TrainingDataset(data.Dataset):
         global_p = torch.from_numpy(self.imu_data['global_p'][index]).float()
         contact_label = torch.from_numpy(self.imu_data['contact_label'][index]).float()
         local_rot = torch.from_numpy(self.imu_data['local_rot'][index]).float()
-        head_start = self.imu_data['head_start'][index]
-        head_start_invert = self.imu_data['head_start_invert'][index]
+        head_start = torch.from_numpy(self.imu_data['head_start'][index]).float()
         info = self.imu_data['info'][index]
-
-        # root_pose = self.imu_data['global_p'][index][:, 0]
-
-        # root_pose_invert = (head_start @ xyz_to_transform_matrices(root_pose))[0, :, :3, 3]
-
+        
+        root_pose = self.imu_data['global_p'][index][:, 0]
         start_frame, end_frame = int(info['start_end'][0]),  int(info['start_end'][1])
 
-        imgs = []
+        if info['dataset'] == 'gimo': # For GIMO dataset
+            scene = info['scene']
+            seq = info['seq']
+            transform_path = info['transform']
+            img_list = os.listdir(os.path.join(self.gimo_dataroot, seq, 'PV'))
+            img_list.sort()
 
-        # if info['dataset'] == 'gimo': # For GIMO dataset
-        #     scene = info['scene']
-        #     seq = info['seq']
-        #     transform_path = info['transform']
-        #     imgs = []
-            # transform_info_file = os.path.join(self.gimo_dataroot, seq, transform_path)
-            # scale = self.transform_scale_dict[transform_info_file] 
-            # transform_norm_file = os.path.join(self.gimo_dataroot, scene, 'scene_obj', 'transform_norm.txt')
-            # transform_norm = self.transform_norm_dict[transform_norm_file]
-            # transform_norm[:3, 3] /= scale
-            # scene_points = self.scene_list[seq.replace('/', '_')] # prepare scene pointcloud
-            # scene_points *= 1 / scale
-            # scene_points = (transform_norm[:3, :3] @ scene_points.T + transform_norm[:3, 3:]).T
-            # sampled_scene_points = self.extract_points_in_bbox(scene_points, root_pose_invert, radius=self.radius)
-            # sampled_scene_points = (head_start_invert @ xyz_to_transform_matrices(sampled_scene_points))[0, :, :3, 3]
-        # elif info['dataset'] == 'egobody': # For Egobody dataset
-        #     scene = info['scene']
-        #     seq = info['seq']
-        #     imgs = []
-            # scene_points = self.scene_list['{}_{}'.format(scene, seq)] # prepare scene pointcloud            
-            # sampled_scene_points = self.extract_points_in_bbox(scene_points, root_pose_invert, radius=self.radius)
-            # sampled_scene_points = (head_start_invert @ xyz_to_transform_matrices(sampled_scene_points))[0, :, :3, 3]
+            imgs = []
+            # poses_input_idx = []
+            # for f in range(self.input_seq_len): # prepare images
+            #     pose_idx = start_frame + int(f * 30 / self.fps)
+            #     poses_input_idx.append(pose_idx)
+            #     img_data = Image.open(os.path.join(self.gimo_dataroot, seq, 'PV', img_list[pose_idx])).convert('RGB') # Read input image
+            #     img_data = self.transform(img_data)
+            #     imgs.append(img_data)
+            # imgs = torch.stack(imgs, dim=0)
+            
+            transform_info = json.load(open(os.path.join(self.gimo_dataroot, seq, transform_path), 'r'))
+            scale = transform_info['scale'] 
+            transform_norm = np.loadtxt(os.path.join(self.gimo_dataroot, scene, 'scene_obj', 'transform_norm.txt')).reshape((4, 4))
+            transform_norm[:3, 3] /= scale
+            
+            scene_points = self.scene_list[seq.replace('/', '_')] # prepare scene pointcloud
+            scene_points = scene_points[np.random.choice(range(len(scene_points)), self.sample_points)]
+            scene_points *= 1 / scale
+            scene_points = (transform_norm[:3, :3] @ scene_points.T + transform_norm[:3, 3:]).T
+            
+            head_invert = invert_T(head_start.numpy())
+            scene_points = (head_invert @ xyz_to_transform_matrices(scene_points))[0, :, :3, 3]
+            
+            scene_points = self.extract_points_in_radius(scene_points, root_pose, radius=self.radius)
+            
+            # if self.mode == 'train':
+            #     scene_points += np.random.normal(loc=0, scale=self.sigma, size=scene_points.shape)
+
+        elif info['dataset'] == 'egobody': # For Egobody dataset
+            scene = info['scene']
+            seq = info['seq']
+            img_path = glob.glob(os.path.join(self.egobody_dataroot, 'egocentric_color', seq, '*', 'PV'))[0]
+            img_list = os.listdir(img_path)
+            img_list.sort()
+            
+            imgs = []
+            # poses_input_idx = []
+            # for f in range(self.input_seq_len): # prepare images
+            #     pose_idx = start_frame + int(f * 30 / self.fps)
+            #     poses_input_idx.append(pose_idx)
+            #     img_data = Image.open(os.path.join(img_path, img_list[pose_idx])).convert('RGB') # Read input image
+            #     img_data = self.transform(img_data)
+            #     imgs.append(img_data)
+            # imgs = torch.stack(imgs, dim=0)
+            
+            scene_points = self.scene_list['{}_{}'.format(scene, seq)] # prepare scene pointcloud
+            scene_points = scene_points[np.random.choice(range(len(scene_points)), self.sample_points)]
+            
+            head_invert = invert_T(head_start.numpy())
+            scene_points = (head_invert @ xyz_to_transform_matrices(scene_points))[0, :, :3, 3]
+            
+            scene_points = self.extract_points_in_radius(scene_points, root_pose, radius=self.radius) # Extract points in a radius of 1.0m
+            
+            # if self.mode == 'train':
+            #     scene_points += np.random.normal(loc=0, scale=self.sigma, size=scene_points.shape)
         
-
-        sampled_scene_points = torch.from_numpy(self.sampled_scene_points_list[index].astype(np.float32))
-
-
         input_ = {}
         
         input_['input_seq'] = input_seq.float()
@@ -798,13 +788,11 @@ class TrainingDataset(data.Dataset):
         input_['root'] = global_p[..., 0, :].float()
         input_['contact_label'] = contact_label.float()
         input_['local_rot'] = local_rot.float()
-        input_['head_start'] = torch.from_numpy(head_start).float()
+        input_['head_start'] = head_start.float()
         # Scene Points
-        input_['scene_points'] = sampled_scene_points
-        # input_['scene_points'] = torch.zeros((1024, 3)).float()
+        input_['scene_points'] = torch.from_numpy(scene_points).float()
         # Input Images
         input_['imgs'] = imgs
-        input_['dataset_name'] = info['dataset']
   
         return input_
 
@@ -844,8 +832,6 @@ class TrainingDataset(data.Dataset):
     def load_imu(self):
         with open(self.imu_path, 'rb') as f:
             self.imu_data = pickle.load(f)
-        if 'scene_points' not in self.imu_data:
-            self.imu_data['scene_points'] = []
         print('IMU information load done')
                  
     def load_data_dict(self):
@@ -865,248 +851,44 @@ class TrainingDataset(data.Dataset):
         return self.dim_dict	
                 
     def load_scene(self):
-        self.scene_list = {}
-        for i, seq in enumerate(tqdm(self.dataset_info_gimo['sequence_path'], desc="Loading GIMO scene")):  # for GIMO
+        self.scene_list = {} 
+        for i, seq in enumerate(self.dataset_info_gimo['sequence_path']): # for GIMO
             scene = self.dataset_info_gimo['scene'][i]
-            scene_key = f"{scene}_{seq}"
-            scene_dir = os.path.join(self.gimo_dataroot, scene, 'scene_obj')
-            full_ply_path = os.path.join(scene_dir, 'scene_downsampled.ply')  # 原始场景点云
-            downsample_ply_path = os.path.join(scene_dir, f'scene_downsampled_{self.scene_downsample_points}.ply')
-
-            if os.path.exists(downsample_ply_path):
-                # 如果已经存在 downsampled 文件，直接读取
-                pcd = o3d.io.read_point_cloud(downsample_ply_path)
-                scene_points = np.asarray(pcd.points, dtype=np.float32)
-            else:
-                # 否则读取原始场景点云并进行 downsample
-                pcd = o3d.io.read_point_cloud(full_ply_path)
-                scene_points = np.asarray(pcd.points, dtype=np.float32)
-
-                if len(scene_points) >= self.scene_downsample_points:
-                    indices = np.random.choice(len(scene_points), self.scene_downsample_points, replace=False)
-                else:
-                    pad = self.scene_downsample_points - len(scene_points)
-                    pad_points = np.tile(scene_points[-1:], (pad, 1))
-                    scene_points = np.concatenate([scene_points, pad_points], axis=0)
-                    indices = np.arange(self.scene_downsample_points)
-
-                scene_points = scene_points[indices]
-
-                # 保存 downsample 后的点云
-                downsampled_pcd = o3d.geometry.PointCloud()
-                downsampled_pcd.points = o3d.utility.Vector3dVector(scene_points)
-                o3d.io.write_point_cloud(downsample_ply_path, downsampled_pcd)
-
-            self.scene_list[scene_key] = scene_points
-
-        
-        for i, seq in enumerate(tqdm(self.dataset_info_egobody['recording_name'], desc="Loading EgoBody scene")):
+            scene_ply = trimesh.load(os.path.join(self.gimo_dataroot, scene, 'scene_obj', 'scene_downsampled.ply'))
+            scene_points = scene_ply.vertices
+            self.scene_list['{}_{}'.format(scene, seq)] = scene_points
+            
+        for i, seq in enumerate(self.dataset_info_egobody['recording_name']): # for Egobody
             scene = self.dataset_info_egobody['scene_name'][i]
-            scene_key = f"{scene}_{seq}"
-            scene_dir = os.path.join(self.egobody_dataroot, 'scene_mesh', scene)
-            ply_path = os.path.join(scene_dir, f'{scene}.obj')
-            
-            # Downsampled point cloud save path
-            downsample_ply_path = os.path.join(scene_dir, f'{scene}_downsampled_{self.scene_downsample_points}.ply')
-
-            if os.path.exists(downsample_ply_path):
-                # Load downsampled point cloud from .ply
-                downsampled_mesh = o3d.io.read_point_cloud(downsample_ply_path)
-                scene_points = np.asarray(downsampled_mesh.points, dtype=np.float32)
-            else:
-                # Read full mesh and get vertices
-                mesh = o3d.io.read_triangle_mesh(ply_path)
-                scene_points = np.asarray(mesh.vertices, dtype=np.float32)
-
-                if len(scene_points) >= self.scene_downsample_points:
-                    indices = np.random.choice(len(scene_points), self.scene_downsample_points, replace=False)
-                else:
-                    pad = self.scene_downsample_points - len(scene_points)
-                    pad_points = np.tile(scene_points[-1:], (pad, 1))
-                    scene_points = np.concatenate([scene_points, pad_points], axis=0)
-                    indices = np.arange(self.scene_downsample_points)
-
-                scene_points = scene_points[indices]
-
-                # Save as point cloud .ply
-                pcd = o3d.geometry.PointCloud()
-                pcd.points = o3d.utility.Vector3dVector(scene_points)
-                o3d.io.write_point_cloud(downsample_ply_path, pcd)
-
-            self.scene_list[scene_key] = scene_points
+            scene_ply = trimesh.load(os.path.join(self.egobody_dataroot, 'scene_mesh', scene, f'{scene}.obj'))
+            scene_points = scene_ply.vertices
+            self.scene_list['{}_{}'.format(scene, seq)] = scene_points
         print('Scene load done')
-
-        for i, info in enumerate(tqdm(self.imu_data['info'], desc="Loading transformation")):
-            if info['dataset'] == 'gimo':
-                seq = info['seq']
-                scene = info['scene']
-                transform_path = info['transform']
-
-                transform_info_file = os.path.join(self.gimo_dataroot, seq, transform_path)
-                if transform_info_file not in self.transform_scale_dict:
-                    transform_info = json.load(open(transform_info_file, 'r'))
-                    scale = transform_info['scale']
-                    self.transform_scale_dict[transform_info_file] = scale
-                transform_norm_file = os.path.join(self.gimo_dataroot, scene, 'scene_obj', 'transform_norm.txt')
-                if transform_norm_file not in self.transform_norm_dict:
-                    transform_norm = np.loadtxt(transform_norm_file).reshape((4, 4)).astype(np.float32)
-                    self.transform_norm_dict[transform_norm_file] = transform_norm
-        
-        if 'head_start_invert' not in self.imu_data:
-            print("head_start_invert 不存在，正在计算...")
-            head_start = self.imu_data['head_start']  # shape: [N, ...]
-            head_start_invert = []
-            for i in range(len(head_start)):
-                # 这里假设 head_start[i] 是 4x4 或 3x4 的变换矩阵
-                head_start_invert.append(invert_T(head_start[i]))
-            self.imu_data['head_start_invert'] = np.array(head_start_invert)
-            print("head_start_invert 计算完成！")
-        else:
-            print("head_start_invert 已存在，无需计算。")
-
-
-        # for i, info in enumerate(tqdm(self.imu_data['info'], desc="Loading transformation")):
-        #     head_start_invert = self.imu_data['head_start_invert'][i]
-        #     seq = info['seq']
-        #     scene = info['scene']
-        #     transform_path = info['transform']
-        #     head_start = self.imu_data['head_start'][i]
-        #     root_pose = self.imu_data['global_p'][i][:, 0]
-        #     root_pose_invert = (head_start @ xyz_to_transform_matrices(root_pose))[0, :, :3, 3]
-        #     if info['dataset'] == 'gimo':
-        #         transform_info_file = os.path.join(self.gimo_dataroot, seq, transform_path)
-        #         scale = self.transform_scale_dict[transform_info_file] 
-        #         transform_norm_file = os.path.join(self.gimo_dataroot, scene, 'scene_obj', 'transform_norm.txt')
-        #         transform_norm = self.transform_norm_dict[transform_norm_file]
-        #         transform_norm[:3, 3] /= scale
-                
-        #         scene_points = self.scene_list[seq.replace('/', '_')] # prepare scene pointcloud
-        #         scene_points *= 1 / scale
-        #         scene_points = (transform_norm[:3, :3] @ scene_points.T + transform_norm[:3, 3:]).T
-
-        #         sampled_scene_points = self.extract_points_in_bbox(scene_points, root_pose_invert, radius=self.radius)
-                
-        #         sampled_scene_points = (head_start_invert @ xyz_to_transform_matrices(sampled_scene_points))[0, :, :3, 3]
-
-        #     elif info['dataset'] == 'egobody':
-        #         scene_points = self.scene_list['{}_{}'.format(scene, seq)] # prepare scene pointcloud
-        #         sampled_scene_points = self.extract_points_in_bbox(scene_points, root_pose_invert, radius=self.radius) # Extract points in a radius of 1.0m
-                        
-        #         sampled_scene_points = (head_start_invert @ xyz_to_transform_matrices(sampled_scene_points))[0, :, :3, 3]
-        #     else:
-        #         raise NotImplementedError
             
-        #     self.imu_data['scene_points'].append(sampled_scene_points)
-
-
-    def _precompute_sampled_scene_points(self, use_disk_cache: bool = True):
-        """
-        Precompute sampled scene points for every sample to avoid heavy work in __getitem__.
-        Each item costs roughly 1024*3*4 bytes ≈ 12KB, so memory is usually fine.
-        For huge datasets, enable on-disk cache.
-        """
-        os.makedirs(os.path.join(self.dataroot, "cache"), exist_ok=True)
-        cache_path = os.path.join(
-            self.dataroot, "cache",
-            f"{self.mode}_sampled_scene_points_{self.cxt_num_points}_{self.radius}.npy"
-        )
-
-        if use_disk_cache and os.path.exists(cache_path):
-            self.sampled_scene_points_list = np.load(cache_path, mmap_mode=None, allow_pickle=True)
-            print(f"[Cache] Loaded precomputed scene points from {cache_path}")
-            return
-
-        N = len(self.imu_data['info'])
-        out = [None] * N
-
-        print("Precomputing sampled scene points...")
-        for i, info in enumerate(tqdm(self.imu_data['info'], desc="Precompute scene points")):
-            dataset = info['dataset']
-            # Per-sample transforms
-            head_start = self.imu_data['head_start'][i]
-            head_start_invert = self.imu_data['head_start_invert'][i]
-            root_pose = self.imu_data['global_p'][i][:, 0]  # (T, 3)
-
-            # Convert root world points into scene frame used for bbox/radius crop
-            # (same as your __getitem__):
-            root_pose_invert = (head_start @ xyz_to_transform_matrices(root_pose))[0, :, :3, 3]
-
-            if dataset == 'gimo':
-                seq = info['seq']
-                scene = info['scene']
-                transform_path = info['transform']
-
-                # Load transforms from dict caches (already prepared in load_scene)
-                transform_info_file = os.path.join(self.gimo_dataroot, seq, transform_path)
-                scale = self.transform_scale_dict[transform_info_file]
-                transform_norm_file = os.path.join(self.gimo_dataroot, scene, 'scene_obj', 'transform_norm.txt')
-                transform_norm = self.transform_norm_dict[transform_norm_file].copy()
-                transform_norm[:3, 3] /= scale
-
-                scene_key = seq.replace('/', '_')
-                scene_points = self.scene_list[scene_key].astype(np.float32)  # base scene pcd
-                scene_points *= 1.0 / scale
-                scene_points = (transform_norm[:3, :3] @ scene_points.T + transform_norm[:3, 3:]).T
-
-                # Crop -> then map back with head_start_invert (same as your __getitem__)
-                cropped = self.extract_points_in_bbox(scene_points, root_pose_invert, radius=self.radius)
-                
-                cropped = (head_start_invert @ xyz_to_transform_matrices(cropped))[0, :, :3, 3]
-                out[i] = cropped.astype(np.float32)
-
-            elif dataset == 'egobody':
-                scene = info['scene']
-                seq = info['seq']
-                scene_key = f"{scene}_{seq}"
-                scene_points = self.scene_list[scene_key].astype(np.float32)
-
-                cropped = self.extract_points_in_bbox(scene_points, root_pose_invert, radius=self.radius)
-
-                cropped = (head_start_invert @ xyz_to_transform_matrices(cropped))[0, :, :3, 3]
-                out[i] = cropped.astype(np.float32)
-            else:
-                # Fallback: zero points (shouldn't happen)
-                out[i] = np.zeros((self.cxt_num_points, 3), dtype=np.float32)
-
-        self.sampled_scene_points_list = np.stack(out).astype(np.float32)
-        print("Precompute done.")
-
-        if use_disk_cache:
-            np.save(cache_path, self.sampled_scene_points_list, allow_pickle=True)
-            print(f"[Cache] Saved precomputed scene points to {cache_path}")
-
-
-def vis_points(train_dataset, i):
-    data_sample = train_dataset[i]
-    print(data_sample['dataset_name'])
-    #input_xyz = data_sample['input_seq'][..., 10:10+3].reshape(-1, 3)
-    input_xyz = data_sample['global_p'].reshape(-1, 3)
-    #trimesh.Trimesh(input_xyz).export('/home/zhanggangjian/nanjie/head.obj')
-    input_xyz = np.array(input_xyz)  # Ensure it's an ndarray
-    print(input_xyz.shape)
-    scene_points = np.array(data_sample['scene_points'])
-
-    pcd1 = o3d.geometry.PointCloud()
-    pcd1.points = o3d.utility.Vector3dVector(input_xyz)
-    pcd1.colors = o3d.utility.Vector3dVector(np.tile([1, 0, 0], (input_xyz.shape[0], 1)))  # 红色 (RGB: 1, 0, 0)
-
-    pcd2 = o3d.geometry.PointCloud()
-    pcd2.points = o3d.utility.Vector3dVector(scene_points)
-    pcd2.colors = o3d.utility.Vector3dVector(np.tile([0, 1, 0], (scene_points.shape[0], 1)))  # 绿色 (RGB: 0, 1, 0)
-
-    # 合并两个点云
-    combined_pcd = pcd1 + pcd2
-
-    # 导出为带颜色的 .ply 文件
-    o3d.io.write_point_cloud(f'./vis/combine_pcd_{i}.ply', combined_pcd)
-
 if __name__=="__main__":
-    data_root = '../MocapEvery_Files_Download'
+
+    data_root = '/home/yaonanjie/project6/orion/group/'
     mode = 'train'
     train_dataset = TrainingDataset(data_root, mode) # ['train', 'test', 'val']
-    i = -200
+    data_sample = train_dataset[0]
+    import trimesh
+    #input_xyz = data_sample['input_seq'][..., 10:10+3].reshape(-1, 3)
+    input_xyz = data_sample['global_p'].reshape(-1,3)
+    #trimesh.Trimesh(input_xyz).export('/home/zhanggangjian/nanjie/head.obj')
+    trimesh.Trimesh(input_xyz).export('/home/yaonanjie/test.obj')
+    trimesh.Trimesh(data_sample['scene_points']).export('/home/yaonanjie/test_scene.obj')
+    print('')
 
-    import ipdb; ipdb.set_trace()
-    vis_points(train_dataset, i)
-
+    # from amass import load_body_model, create_mesh_from_output
+    # bm_path = "../data/smpl_models/smplx/SMPLX_NEUTRAL.npz"
+    # bm = load_body_model(bm_path=bm_path)
+    # tgt_seq = data_sample['tgt_seq'] # 40, 135
+    # vertices, faces = amass.create_mesh_from_output(tgt_seq, bm)
+ 
+     # data_root = '/home/zhanggangjian/nanjie/project6/orion/group/'
+    # mode = 'train'
+     # gimo_path = os.path.join(base_dir, 'GIMO')
+    # egobody_path = os.path.join(base_dir, 'Egobody_dataset')
     
+    
+ 

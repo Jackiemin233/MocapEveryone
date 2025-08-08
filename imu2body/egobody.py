@@ -119,7 +119,7 @@ def create_skeleton_from_amass_bodymodel(bm, betas=None):
 	skel = motion_class.Skeleton(
 		v_up=np.array([0.0, 1.0, 0.0]),
         v_face=np.array([0.0, 0.0, 1.0]),
-        v_up_env=np.array([0.0, 0.0, 1.0]),
+        v_up_env=np.array([0.0, 1.0, 0.0]),
 	)
 	for i in range(num_joints):
 		skel.add_joint(joints[i], parent_joints[i])
@@ -210,7 +210,7 @@ def create_motion_from_egobody_data(filename, bm, transform_info = None, transfo
 		motion_resampled = motion_ops.resample(motion, fps=motion_constants.FPS)
 	elif fps == motion_constants.FPS:
 		motion_resampled = motion
-	motion_adjust_height, foot_offset = motion_ops.adjust_height(motion_resampled, height_axis=motion_constants.UP_AXIS, pivot=motion_constants.contact_pivot)
+	motion_adjust_height, foot_offset = motion_ops.adjust_height(motion_resampled, height_axis=motion_constants.UP_AXIS_EGOBODY, pivot=motion_constants.contact_pivot)
 	return motion_adjust_height
 
 	# motion_resampled = motion_ops.resample(motion, fps=motion_constants.FPS) if fps != motion_constants.FPS else motion 
@@ -361,26 +361,6 @@ def create_tpose(bm_path, default_beta=True):
 	# motion_adjust_height, foot_offset = motion_ops.adjust_height(motion_resampled, height_axis=motion_constants.UP_AXIS)
 	
 	# return motion_adjust_height
-
-
-
-def load(file, bm=None, bm_path=None, load_motion=True, load_mesh=False):
-	if bm is None:
-		assert bm_path is not None, "Please provide SMPL body model path"
-		bm = load_body_model(bm_path)
-	motion_sequence =  create_motion_from_amass_data(
-		filename=file, bm=bm, load_motion=load_motion)
-	mesh_sequence = None if not load_mesh else create_mesh_from_amass_data(file, bm=bm)
-	return motion_sequence, mesh_sequence
-
-
-def save():
-	raise NotImplementedError("Using bvh.save() is recommended")
-
-
-def load_parallel(files, cpus=20, **kwargs):
-	return utils.run_parallel(load, files, num_cpus=cpus, **kwargs)
-
 
 if __name__ == "__main__":
 	bm_path = "../data/smpl_models/smplx/SMPLX_NEUTRAL.npz"

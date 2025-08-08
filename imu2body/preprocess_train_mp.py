@@ -33,6 +33,8 @@ import constants.motion_data as motion_constants
 import imu2body.imu as imu
 from interaction.contact import *
 import pandas as pd
+from functools import partial
+from multiprocessing import Pool, cpu_count
 
 logging.basicConfig(
     format="[%(asctime)s] %(message)s",
@@ -46,47 +48,85 @@ smplh_bm_path = "../data/smpl_models/smplh/male/model.npz"
 CUR_BM_TYPE = "smplx"
 
 
+
+
+
+def process_sequence(seq, base_dir, cur_bm_type='smplx'):
+    if seq['dataset'] == 'gimo':
+        filepath_list = [os.path.join(base_dir, 'GIMO', seq['fname'], 'smplx_local', file) for file in seq['file']]
+        transform_info = json.load(open(os.path.join(base_dir, 'GIMO', seq['fname'], seq['transform']), 'r')) # pose to scene transformation
+        transform_norm = np.loadtxt(os.path.join(base_dir, 'GIMO', seq['fname'], '../', 'scene_obj', 'transform_norm.txt')).reshape((4, 4))
+        pkl_files = [f for f in filepath_list if f.endswith('.pkl')]
+    elif seq['dataset'] == 'egobody':
+        pkl_files = [os.path.join(base_dir, 'Egobody_dataset', f"smplx_camera_wearer_{seq['mode']}", seq['fname'], seq['body_index'], 'results', file, '000.pkl') for file in seq['file']]
+        transform_info = None
+        transform_norm = None
+
+    # read skel and files	
+    if CUR_BM_TYPE == "smplx":
+        if seq['dataset'] == 'gimo':
+            bm_path = smplx_bm_path
+            body_model = gimo.load_body_model(bm_path=bm_path)
+            skel_with_offset = gimo.create_skeleton_from_amass_bodymodel(bm=body_model)	
+            skel = skel_with_offset[0]
+            motion = gimo.create_motion_from_gimo_data(pkl_files, 
+                                                        bm=body_model, 
+                                                        transform_info = transform_info, 
+                                                        transform_norm = transform_norm, 
+                                                        skel_with_offset=deepcopy(skel_with_offset))
+        elif seq['dataset'] == 'egobody':
+            bm_path = smplx_bm_path
+            body_model = egobody.load_body_model(bm_path=bm_path)
+            skel_with_offset = egobody.create_skeleton_from_amass_bodymodel(bm=body_model)	
+            skel = skel_with_offset[0]
+            motion = egobody.create_motion_from_egobody_data(pkl_files, 
+                                                            bm=body_model, 
+                                                            transform_info = transform_info, 
+                                                            transform_norm = transform_norm, 
+                                                            skel_with_offset=deepcopy(skel_with_offset))
+    
+    else:
+        raise NotImplementedError("Only smplx are supported!")
+    
+    return {
+        'motion': motion,
+        'seq': seq,
+        'skel': skel
+    }
+
+
+
+
 def load_data_from_training(base_dir, file_list, setting = 'vr', debug=False, normalization = False):
+    logging.info(f"Start loading {len(file_list)} sequences with multiprocessing...")
+
+    try:
+        with Pool(processes=cpu_count()) as pool:
+            results = list(tqdm(pool.imap(partial(process_sequence, base_dir=base_dir), file_list), total=len(file_list)))
+    except KeyboardInterrupt:
+        print("User cancelled. Terminating pool...")
+        pool.terminate()
+        pool.join()
+        raise
+    except Exception as e:
+        print(f"Error: {e}. Terminating pool...")
+        pool.terminate()
+        pool.join()
+        raise
+    finally:
+        if pool:
+            pool.close()
+            pool.join()
+
+
     motion_list = []
     data_set_info = []
-    for seq in tqdm(file_list):
-        if seq['dataset'] == 'gimo':
-            filepath_list = [os.path.join(base_dir, 'GIMO', seq['fname'], 'smplx_local', file) for file in seq['file']]
-            transform_info = json.load(open(os.path.join(base_dir, 'GIMO', seq['fname'], seq['transform']), 'r')) # pose to scene transformation
-            transform_norm = np.loadtxt(os.path.join(base_dir, 'GIMO', seq['fname'], '../', 'scene_obj', 'transform_norm.txt')).reshape((4, 4))
-            pkl_files = [f for f in filepath_list if f.endswith('.pkl')]
-        elif seq['dataset'] == 'egobody':
-            pkl_files = [os.path.join(base_dir, 'Egobody_dataset', f"smplx_camera_wearer_{seq['mode']}", seq['fname'], seq['body_index'], 'results', file, '000.pkl') for file in seq['file']]
-            transform_info = None
-            transform_norm = None
-   
-        # read skel and files	
-        if CUR_BM_TYPE == "smplx":
-            if seq['dataset'] == 'gimo':
-                bm_path = smplx_bm_path
-                body_model = gimo.load_body_model(bm_path=bm_path)
-                skel_with_offset = gimo.create_skeleton_from_amass_bodymodel(bm=body_model)	
-                skel = skel_with_offset[0]
-                motion_list.append(gimo.create_motion_from_gimo_data(pkl_files, 
-                                                                    bm=body_model, 
-                                                                    transform_info = transform_info, 
-                                                                    transform_norm = transform_norm, 
-                                                                    skel_with_offset=deepcopy(skel_with_offset)))
-                data_set_info.append(seq)
-            elif seq['dataset'] == 'egobody':
-                bm_path = smplx_bm_path
-                body_model = egobody.load_body_model(bm_path=bm_path)
-                skel_with_offset = egobody.create_skeleton_from_amass_bodymodel(bm=body_model)	
-                skel = skel_with_offset[0]
-                motion_list.append(egobody.create_motion_from_egobody_data(pkl_files, 
-                                                                    bm=body_model, 
-                                                                    transform_info = transform_info, 
-                                                                    transform_norm = transform_norm, 
-                                                                    skel_with_offset=deepcopy(skel_with_offset)))
-                data_set_info.append(seq)
-      
-        else:
-            raise NotImplementedError("Only smplx are supported!")
+    for res in results:
+        if res['motion'] is not None:
+            motion_list.append(res['motion'])
+            data_set_info.append(res['seq'])
+            skel = res['skel']  # Use skel from the last one
+
 
     logging.info(f"Done converting GIMO and Egobody dataset into fairmotion Motion class")
 
@@ -258,7 +298,9 @@ def load_data_from_training(base_dir, file_list, setting = 'vr', debug=False, no
     # return global pos for FK loss calc
     global_p = normalized_global_T[...,:3,3]
 
-    return head_imu_input, ee_pos_v, output, global_p, local_T[...,:3,:3], head_start_T, c_lr, info_list
+
+
+    return head_imu_input, ee_pos_v, output, global_p, local_T[...,:3,:3], head_start_T, c_lr, info_list, scene_points
 
 def load_data_with_args_train(file_list, args, mode = 'train'):
     data, total_len = load_data(file_list, base_dir=args.base_dir, setting=args.setting, mode = mode)            
@@ -269,7 +311,7 @@ def load_data_with_args_train(file_list, args, mode = 'train'):
 def load_data(file_list_total, base_dir = "", setting = 'vr', mode = 'train'):
     file_list = [f for f in file_list_total if f['mode'] == mode]
 
-    head_imu_input, ee_pos, output, global_p, local_rot, head_start, c_lr, info = load_data_from_training(base_dir, file_list, setting = setting , normalization=True)
+    head_imu_input, ee_pos, output, global_p, local_rot, head_start, c_lr, info, scene_points = load_data_from_training(base_dir, file_list, setting = setting , normalization=True)
 
     # set necessary information to dictionary
     total, seq_len, _  = output.shape
@@ -283,6 +325,7 @@ def load_data(file_list_total, base_dir = "", setting = 'vr', mode = 'train'):
     input_['head_start'] = head_start 
     input_['contact_label'] = c_lr
     input_['info'] = info
+    input_['scene_points'] = scene_points
 
     return input_, total
 

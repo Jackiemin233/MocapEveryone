@@ -451,10 +451,10 @@ def load_data_from_training(base_dir, file, setting = 'vr', debug=False, normali
 	info_list = []
 	
 	if setting == 'vr':
-		ee_joint_names = motion_constants.FOOT_JOINTS
+		ee_joint_names = imu_constants.imu_joint_names + motion_constants.FOOT_JOINTS
 		ee_joint_idx = [skel.get_index_joint(jn) for jn in ee_joint_names]
 	else:
-		ee_joint_names = imu_constants.imu_joint_names + motion_constants.FOOT_JOINTS
+		ee_joint_names = motion_constants.FOOT_JOINTS
 		ee_joint_idx = [skel.get_index_joint(jn) for jn in ee_joint_names]
 
 	# constants
@@ -592,7 +592,7 @@ def load_data_from_training(base_dir, file, setting = 'vr', debug=False, normali
 	result_dict['total_length'] = motion_local_T.shape[0]
 
 	# save
-	with open(os.path.join(os.path.join(args.save_path), f"{seq['dataset']}_test", f"{seq['fname'].replace('/', '-')}.pkl"), "wb") as file:
+	with open(os.path.join(os.path.join(args.save_path), f"{seq['dataset']}_test_old", f"{seq['fname'].replace('/', '-')}.pkl"), "wb") as file:
 		pickle.dump(result_dict, file, protocol=pickle.HIGHEST_PROTOCOL)
    
 def load_filelist(args):
@@ -683,8 +683,8 @@ def load_filelist(args):
 			load_data_from_gimo_eval(base_dir = os.path.join(args.base_dir, fnames, 'smplx_local'), file_list=bvh_list, start_end = start_end, idx = idx) #base_dir, file_list, debug=False, start_end=None
 			idx += 1
 	elif args.data_type == 'train':
-		os.makedirs(os.path.join(args.save_path, 'gimo_test'), exist_ok=True)
-		os.makedirs(os.path.join(args.save_path, 'egobody_test'), exist_ok=True)
+		os.makedirs(os.path.join(args.save_path, 'gimo_test_old'), exist_ok=True)
+		os.makedirs(os.path.join(args.save_path, 'egobody_test_old'), exist_ok=True)
 		for file in file_lists:
 			load_data_from_training(base_dir = args.base_dir, file = file, normalization = True, setting = args.setting)
 

@@ -1,5 +1,5 @@
 data:
-    preprocess: /home/zhanggangjian/nanjie/project6/orion/group/ # Change to your path
+    preprocess: /home/yaonanjie/project6/orion/group # Change to your path
 
 model:
     hidden_dim1: 1280 
@@ -8,11 +8,11 @@ model:
     num_head2: 10
     sep_encoder: True 
     # Ours
-    temporal_model: False #True # Done
-    wavelet_emb: True
+    temporal_model: True #True # Done
+    wavelet_emb: False
     visual_input : False # TBD
     hand_estimator: False
-    environment_enc: False
+    environment_enc: True
     
     hidden_dim_scene: 1280
     
@@ -28,7 +28,7 @@ train:
     loss_mid_weight: 1.0
     loss_est_weight: 0.3
     loss_contact_weight: 0.3
-    num_epoch: 200
+    num_epoch: 300
     lr_decay: 0.9993
     pretrained: ''
     save_frequency: 4

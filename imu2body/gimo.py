@@ -152,6 +152,7 @@ def create_motion_from_gimo_data(filename, bm, transform_info = None, transform_
     
 				ori_list.append(R_s.unsqueeze(0))
 				trans_list.append(trans_s.unsqueeze(0))
+				# import ipdb; ipdb.set_trace()
     
 			bdata['orient'] = torch.cat(ori_list, dim = 0)
 			bdata['trans'] = torch.cat(trans_list, dim = 0)
@@ -216,7 +217,7 @@ def create_motion_from_gimo_data(filename, bm, transform_info = None, transform_
 		motion_resampled = motion_ops.resample(motion, fps=motion_constants.FPS)
 	elif fps == motion_constants.FPS:
 		motion_resampled = motion
-	motion_adjust_height, foot_offset = motion_ops.adjust_height(motion_resampled, height_axis=motion_constants.UP_AXIS, pivot=motion_constants.contact_pivot)
+	motion_adjust_height, foot_offset = motion_ops.adjust_height(motion_resampled, height_axis=motion_constants.UP_AXIS_GIMO, pivot=motion_constants.contact_pivot)
 	return motion_adjust_height
 
 	# motion_resampled = motion_ops.resample(motion, fps=motion_constants.FPS) if fps != motion_constants.FPS else motion 

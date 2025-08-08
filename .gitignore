@@ -1,6 +1,7 @@
 __pycache__
 *.pt
 *.pth
+vis/
 /data/
 output
 results
@@ -8,3 +9,7 @@ results
 /libraries/S2Fusion
 /libraries/Tracking-Anything-with-DEVA
 /libraries/Pointnet2_PyTorch
+/MocapEvery_Files_Download/
+/libraries
+*.ply
+*.pkl

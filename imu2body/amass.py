@@ -19,6 +19,7 @@ from fairmotion.ops import conversions, math as fairmotion_math
 from fairmotion.data import bvh
 import constants.motion_data as motion_constants
 import imu2body.amass as amass
+from imu2body.functions import * 
 
 # from bvh import Skeleton
 
@@ -267,10 +268,6 @@ def create_tpose(bm_path, default_beta=True):
 	skel, offset = create_skeleton_from_amass_bodymodel(
 		bm, betas=betas
 	)
-		
-	# root_orient = bdata["poses"][:, :3]  # controls the global root orientation (frame, 3)
-	# pose_body = bdata["poses"][:, 3:66]  # controls body joint angles (frame, 63)
-	# trans = bdata["trans"][:, :3]  # controls root translation (frame, 3)
 	
 	root_orient = np.zeros(shape=(1,3))
 	pose_body = np.zeros(shape=(1,63))
@@ -328,14 +325,6 @@ def create_tpose(bm_path, default_beta=True):
 	# motion = motion_ops.rotate(motion, conversions.Ax2R(conversions.deg2rad(90))) # match to z up axis
 
 	return motion, mesh_seq, offset
-	# if motion_constants.UP_AXIS == "y":
-
-	# motion_resampled = motion_ops.resample(motion, fps=motion_constants.FPS) if fps != motion_constants.FPS else motion 
-	# motion_adjust_height, foot_offset = motion_ops.adjust_height(motion_resampled, height_axis=motion_constants.UP_AXIS)
-	
-	# return motion_adjust_height
-
-
 
 def load(file, bm=None, bm_path=None, load_motion=True, load_mesh=False):
 	if bm is None:
@@ -353,6 +342,28 @@ def save():
 
 def load_parallel(files, cpus=20, **kwargs):
 	return utils.run_parallel(load, files, num_cpus=cpus, **kwargs)
+
+def create_mesh_from_output(output, bm, offset=None, betas = None):
+	if offset is None: # offset with default betas
+		offset = np.array([ 0.00312326, -0.35140747,  0.01203655])
+  
+	frames = output.shape[0]
+	output_matrix = transforms.rotation_6d_to_matrix(output[..., 3:].reshape((frames, -1, 6)))
+	output_joint_axis = matrix_to_axis_angle(output_matrix)
+  
+	root_orient = output_joint_axis[:, :1].reshape((frames, -1))  # controls the global root orientation (frame, 3)
+	pose_body = output_joint_axis[:, 1:].reshape((frames, -1))  # controls body joint angles (frame, 63)
+	trans = output[:, :3]  # controls root translation (frame, 3)
+ 
+ 	# add default hand pose
+	default_pose_hand = motion_constants.pose_hand
+	default_pose_hand = default_pose_hand.unsqueeze(0).repeat(frames, 1)
+  
+	body = bm(pose_body=pose_body, root_orient=root_orient, pose_hand=default_pose_hand, betas=betas, trans=trans)
+	vertices_seq = body.v.numpy()
+	faces = body.f.numpy()
+
+	return vertices_seq, faces
 
 
 if __name__ == "__main__":

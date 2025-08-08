@@ -353,6 +353,7 @@ metric_funcs_dict = {
 import math
 RADIANS_TO_DEGREES = 360.0 / (2 * math.pi)
 METERS_TO_CENTIMETERS = 100.0
+METERS_TO_MILLIMETERS = 1000.0
 
 pred_metrics = [
     "mpjre",
@@ -371,24 +372,44 @@ gt_metrics = [
 all_metrics = pred_metrics + gt_metrics
 
 metrics_coeffs = {
-    "contact": METERS_TO_CENTIMETERS,
+    "contact": METERS_TO_MILLIMETERS,
     "mpjre": RADIANS_TO_DEGREES,
-    "mpjpe": METERS_TO_CENTIMETERS,
-    "mpjve": METERS_TO_CENTIMETERS,
-    "handpe": METERS_TO_CENTIMETERS,
-    "upperpe": METERS_TO_CENTIMETERS,
-    "lowerpe": METERS_TO_CENTIMETERS,
-    "rootpe": METERS_TO_CENTIMETERS,
-    "pred_jitter": 1.0,
-    "gt_jitter": 1.0,
-    "gt_mpjpe": METERS_TO_CENTIMETERS,
-    "gt_mpjve": METERS_TO_CENTIMETERS,
-    "gt_handpe": METERS_TO_CENTIMETERS,
-    "gt_rootpe": METERS_TO_CENTIMETERS,
-    "gt_upperpe": METERS_TO_CENTIMETERS,
-    "gt_lowerpe": METERS_TO_CENTIMETERS,
-    "root_mpjpe": METERS_TO_CENTIMETERS,
+    "mpjpe": METERS_TO_MILLIMETERS,
+    "mpjve": METERS_TO_MILLIMETERS,
+    "handpe": METERS_TO_MILLIMETERS,
+    "upperpe": METERS_TO_MILLIMETERS,
+    "lowerpe": METERS_TO_MILLIMETERS,
+    "rootpe": METERS_TO_MILLIMETERS,
+    "pred_jitter": 0.01,
+    "gt_jitter": 0.01,
+    "gt_mpjpe": METERS_TO_MILLIMETERS,
+    "gt_mpjve": METERS_TO_MILLIMETERS,
+    "gt_handpe": METERS_TO_MILLIMETERS,
+    "gt_rootpe": METERS_TO_MILLIMETERS,
+    "gt_upperpe": METERS_TO_MILLIMETERS,
+    "gt_lowerpe": METERS_TO_MILLIMETERS,
+    "root_mpjpe": METERS_TO_MILLIMETERS,
 }
+
+# metrics_coeffs = {
+#     "contact": METERS_TO_CENTIMETERS,
+#     "mpjre": RADIANS_TO_DEGREES,
+#     "mpjpe": METERS_TO_CENTIMETERS,
+#     "mpjve": METERS_TO_CENTIMETERS,
+#     "handpe": METERS_TO_CENTIMETERS,
+#     "upperpe": METERS_TO_CENTIMETERS,
+#     "lowerpe": METERS_TO_CENTIMETERS,
+#     "rootpe": METERS_TO_CENTIMETERS,
+#     "pred_jitter": 1.0,
+#     "gt_jitter": 1.0,
+#     "gt_mpjpe": METERS_TO_CENTIMETERS,
+#     "gt_mpjve": METERS_TO_CENTIMETERS,
+#     "gt_handpe": METERS_TO_CENTIMETERS,
+#     "gt_rootpe": METERS_TO_CENTIMETERS,
+#     "gt_upperpe": METERS_TO_CENTIMETERS,
+#     "gt_lowerpe": METERS_TO_CENTIMETERS,
+#     "root_mpjpe": METERS_TO_CENTIMETERS,
+# }
 
 
 def get_metric_function(metric):

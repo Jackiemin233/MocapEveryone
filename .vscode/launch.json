@@ -1,0 +1,46 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Preprocess test data",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/imu2body_eval/eval_by_files_train.py",
+            "args": [
+                "--data-config-path=./data_config/",
+                "--base-dir=../MocapEvery_Files_Download/",
+                "--save-path=../MocapEvery_Files_Download",
+                "--data-type=train"
+            ],
+            "cwd": "${workspaceFolder}/imu2body_eval",
+            "justMyCode": true
+        },
+        {
+            "name": "Preprocess train data",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/imu2body/preprocess_train.py",
+            "args": [
+                "--data-config-path=./data_config/",
+                "--base-dir=../MocapEvery_Files_Download", 
+                "--preprocess-path=preprocess_train_vr_debug",
+                "--setting=vr",
+            ],
+            "cwd": "${workspaceFolder}/imu2body",
+            "justMyCode": true
+        },
+        {
+            "name": "Train MIX",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/imu2body/run_gimo_train.py",
+            "args": [
+                "--test_name=mocapee_vr_debug",
+                "--mode=train",
+                "--config=example_config"
+            ],
+            "cwd": "${workspaceFolder}/imu2body",
+            "justMyCode": true
+        },
+    ]
+}
