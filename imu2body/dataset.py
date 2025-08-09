@@ -642,13 +642,13 @@ class TrainingDataset(data.Dataset):
         self.sample_points = 60000
         self.sigma = 0.1
         self.img_size = 224
-        self.radius = 1.5
+        self.radius = 3
 
         self.dataset_info_gimo = pd.read_csv(os.path.join(self.gimo_dataroot, 'dataset.csv'))
         self.dataset_info_egobody = pd.read_csv(os.path.join(self.egobody_dataroot, 'data_info_release.csv'))
         self.dataset_splitinfo_egobody = pd.read_csv(os.path.join(self.egobody_dataroot, 'data_split.csv'))
         
-        self.parse_data_info()
+        self.parse_data_info() 
         self.load_imu()
         self.load_scene()
 
@@ -670,7 +670,7 @@ class TrainingDataset(data.Dataset):
         self.std = np.std(self.imu_data['input_seq'], axis=(0,1))
         
     def extract_points_in_radius(self,point_cloud, centers, radius, max_points_per_center=None):
-        assert centers.ndim == 2 and centers.shape[1] == 3, "中心点序列必须是 (N, 3) 形状"
+        assert centers.ndim == 2 and centers.shape[1] == 3, "Shape Error!"
         
         if max_points_per_center is None:
             max_points_per_center = min(5000, len(point_cloud) // max(1, len(centers)))
@@ -861,6 +861,13 @@ class TrainingDataset(data.Dataset):
         for i, seq in enumerate(self.dataset_info_egobody['recording_name']): # for Egobody
             scene = self.dataset_info_egobody['scene_name'][i]
             scene_ply = trimesh.load(os.path.join(self.egobody_dataroot, 'scene_mesh', scene, f'{scene}.obj'))
+            # transformation from master camera to scene mesh
+            cam2world_dir = os.path.join(self.egobody_dataroot, 'calibrations', seq, 'cal_trans/kinect12_to_world')  
+            with open(os.path.join(cam2world_dir, scene + '.json'), 'r') as f:
+                trans = np.array(json.load(f)['trans'])
+            trans = np.linalg.inv(trans)
+            scene_ply.apply_transform(trans)
+            
             scene_points = scene_ply.vertices
             self.scene_list['{}_{}'.format(scene, seq)] = scene_points
         print('Scene load done')
@@ -870,7 +877,7 @@ if __name__=="__main__":
 	data_root = '/home/yaonanjie/project6/orion/group/'
 	mode = 'train'
 	train_dataset = TrainingDataset(data_root, mode) # ['train', 'test', 'val']
-	data_sample = train_dataset[0]
+	data_sample = train_dataset[0] #-7000
 	import trimesh
 	#input_xyz = data_sample['input_seq'][..., 10:10+3].reshape(-1, 3)
 	input_xyz = data_sample['global_p'].reshape(-1,3)

@@ -138,24 +138,6 @@ class IMU2BodyModel(nn.Module):
             temporal=self.temporal
         )
         
-        # self.imu2hand = WaveletTransformerEncoderModel(
-        #     input_dim=input_dim * 2,
-        #     output_dim=mid_dim * 4,
-        #     hidden_dim=model_config['hidden_dim1'],
-        #     num_heads=model_config['num_head1'],
-        #     temporal=self.temporal
-        # )
-        
-        # # imu + head + ee pose -> contact, output
-        # self.hand2body = WaveletTransformerEncoderModel(
-        #     input_dim = hand2body_input_dim,
-        #     output_dim=output_dim * 4,
-        #     hidden_dim=model_config['hidden_dim2'],
-        #     num_heads=model_config['num_head2'],
-        #     estimate_contact=True,
-        #     temporal=self.temporal,
-        # )
-        
     def init_weights(self):
         self.imu2hand.init_weights()
         self.hand2body.init_weights()

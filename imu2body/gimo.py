@@ -87,7 +87,7 @@ def bvh_to_amass_motion(bvh_filename, amass_skel):
 		motion_resampled = motion_ops.resample(amass_motion, fps=motion_constants.FPS)
 	elif fps == motion_constants.FPS:
 		motion_resampled = amass_motion
-	motion_adjust_height, foot_offset = motion_ops.adjust_height(motion_resampled, height_axis=motion_constants.UP_AXIS, pivot=motion_constants.contact_pivot)
+	motion_adjust_height, foot_offset = motion_ops.adjust_height(motion_resampled, height_axis=motion_constants.UP_AXIS_GIMO, pivot=motion_constants.contact_pivot)
 	return motion_adjust_height
 
 def create_skeleton_from_amass_bodymodel(bm, betas=None):

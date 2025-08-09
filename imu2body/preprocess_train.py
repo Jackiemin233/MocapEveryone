@@ -118,7 +118,7 @@ def load_data_from_training(base_dir, file_list, setting = 'vr', debug=False, no
 	
 	is_custom_run = False
 	for motion, info in tqdm(zip(motion_list, data_set_info)):
-		height_indice = 1 if info['dataset'] == 'gimo' else 2 # y for GIMO and z for egobody
+		height_indice = 1 if info['dataset'] == 'gimo' else 1
      
 		if motion is None or motion.num_frames() < window:
 			continue
@@ -148,11 +148,11 @@ def load_data_from_training(base_dir, file_list, setting = 'vr', debug=False, no
 			local_T_window_height_adjust = deepcopy(local_T_window)
 			global_T_window_height_adjust = deepcopy(global_T_window)
 
-			if not is_custom_run:
-				_, cur_height_offset = get_height_offset_current_frame(contact_dict=contact, cur_frame=i)
-				if abs(cur_height_offset) > 0:
-					local_T_window_height_adjust[:, 0, height_indice, 3] -= cur_height_offset
-					global_T_window_height_adjust[..., height_indice, 3] -= cur_height_offset
+			# if not is_custom_run:
+			# 	_, cur_height_offset = get_height_offset_current_frame(contact_dict=contact, cur_frame=i)
+			# 	if abs(cur_height_offset) > 0:
+			# 		local_T_window_height_adjust[:, 0, height_indice, 3] -= cur_height_offset
+			# 		global_T_window_height_adjust[..., height_indice, 3] -= cur_height_offset
 
 			# record
 			local_T.append(local_T_window_height_adjust)
@@ -170,7 +170,7 @@ def load_data_from_training(base_dir, file_list, setting = 'vr', debug=False, no
 			i += offset
 			if not is_custom_run:
 				# update floor for next window
-				result_dict = update_height_offset(global_T=global_T_window, prev_offset=height_offset, frame_start=i, return_contact_labels=True)
+				result_dict = update_height_offset(global_T=global_T_window, prev_offset=height_offset, frame_start=i, return_contact_labels=True, height_indice = height_indice)
 
 				updated_height_offset = result_dict['height']
 				updated_contact_frame = result_dict['frame']

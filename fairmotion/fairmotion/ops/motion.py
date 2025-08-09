@@ -321,7 +321,7 @@ def adjust_height(motion, lfoot="LeftToe", rfoot="RightToe", height_axis="y", pi
 
     # add offset so the minimum would be zero
     translation = np.zeros(3)
-    translation[y_or_z] = -1*min_foot_height
+    translation[y_or_z] = -1*min_foot_height #NOTE: DEBUG
     return  translate(motion, translation), -1*min_foot_height
 
 

@@ -87,7 +87,7 @@ def bvh_to_amass_motion(bvh_filename, amass_skel):
 		motion_resampled = motion_ops.resample(amass_motion, fps=motion_constants.FPS)
 	elif fps == motion_constants.FPS:
 		motion_resampled = amass_motion
-	motion_adjust_height, foot_offset = motion_ops.adjust_height(motion_resampled, height_axis=motion_constants.UP_AXIS, pivot=motion_constants.contact_pivot)
+	motion_adjust_height, foot_offset = motion_ops.adjust_height(motion_resampled, height_axis=motion_constants.UP_AXIS_EGOBODY, pivot=motion_constants.contact_pivot)
 	return motion_adjust_height
 
 def create_skeleton_from_amass_bodymodel(bm, betas=None):
@@ -119,7 +119,7 @@ def create_skeleton_from_amass_bodymodel(bm, betas=None):
 	skel = motion_class.Skeleton(
 		v_up=np.array([0.0, 1.0, 0.0]),
         v_face=np.array([0.0, 0.0, 1.0]),
-        v_up_env=np.array([0.0, 1.0, 0.0]),
+        v_up_env=np.array([0.0, 0.0, 1.0]),
 	)
 	for i in range(num_joints):
 		skel.add_joint(joints[i], parent_joints[i])
@@ -165,9 +165,6 @@ def create_motion_from_egobody_data(filename, bm, transform_info = None, transfo
 	else: 
 		skel, offset = deepcopy(skel_with_offset)
 	
-	# if "mocap_frame_rate" not in bdata.files:
-	# 	return None
-	# fps = float(bdata["mocap_frame_rate"])    
 	fps = 30.0 #NOTE: Hard code
 	root_orient = bdata["orient"][:, :3]  # controls the global root orientation (frame, 3)
 	trans = bdata["trans"][:, :3]  # controls root translation (frame, 3)
@@ -198,8 +195,6 @@ def create_motion_from_egobody_data(filename, bm, transform_info = None, transfo
 				)
 			pose_data.append(T)
 		motion.add_one_frame(pose_data)
-	
-	motion = motion_ops.rotate(motion, conversions.Ax2R(conversions.deg2rad(180)))
 
 	if fps % motion_constants.FPS == 0:
 		stride = int(fps / motion_constants.FPS)
@@ -210,15 +205,11 @@ def create_motion_from_egobody_data(filename, bm, transform_info = None, transfo
 		motion_resampled = motion_ops.resample(motion, fps=motion_constants.FPS)
 	elif fps == motion_constants.FPS:
 		motion_resampled = motion
-	motion_adjust_height, foot_offset = motion_ops.adjust_height(motion_resampled, height_axis=motion_constants.UP_AXIS_EGOBODY, pivot=motion_constants.contact_pivot)
-	return motion_adjust_height
-
-	# motion_resampled = motion_ops.resample(motion, fps=motion_constants.FPS) if fps != motion_constants.FPS else motion 
-	# motion_adjust_height, foot_offset = motion_ops.adjust_height(motion_resampled, height_axis=motion_constants.UP_AXIS, pivot=motion_constants.contact_pivot)
-	# return motion_adjust_height
+	return motion_resampled
+	#motion_adjust_height, foot_offset = motion_ops.adjust_height(motion_resampled, height_axis=motion_constants.UP_AXIS_EGOBODY, pivot=motion_constants.contact_pivot)
+	#return motion_adjust_height
 
 def create_mesh_from_amass_fairmotion(motion, bm, offset=None, betas=None):
-
 	if offset is None: # offset with default betas
 		offset = np.array([ 0.00312326, -0.35140747,  0.01203655])
 
@@ -336,7 +327,7 @@ def create_tpose(bm_path, default_beta=True):
 	for frame in range(pose_body.shape[0]):
 		pose_body_frame = pose_body[frame]
 		root_orient_frame = root_orient[frame]
-		root_trans_frame = trans[frame] + offset # add offset 
+		root_trans_frame = trans[frame] # + offset # add offset 
 		pose_data = []
 		for j in range(num_joints):
 			if j == 0:

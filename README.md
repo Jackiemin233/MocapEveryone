@@ -147,6 +147,7 @@ To train the motion estimation module, first you should download GIMO dataset an
 |--Eegocentric_color
 |--scene_mesh
 |--smplx_camera_wearer_test
+|--calibrations
 |--...
 ```
 And download VPoser checkpoint and put them to the '...data/smpl_models/vposer_v1_0'. then preprocess the data with the following command. (This step is to decode processed SMPL latent training data from GIMO dataset)

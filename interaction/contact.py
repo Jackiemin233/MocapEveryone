@@ -218,14 +218,13 @@ def generate_contact_labels(global_T, only_foot=True): # move contact related co
 	contact = np.concatenate((contact[:,0:1], contact), axis=-1) # pad first frame
 	return contact 
 
-def update_height_offset(global_T, prev_offset, frame_start, return_contact_labels=False, return_contact_foot_pos=False, contact_labels=None):
+def update_height_offset(global_T, prev_offset, frame_start, return_contact_labels=False, return_contact_foot_pos=False, contact_labels=None, height_indice = None):
 	if contact_labels is not None:
 		foot_contact = contact_labels
 	else:
 		foot_contact = generate_contact_labels(global_T=global_T, only_foot=True)
 
 	toe_joint_idx = motion_constants.toe_joints_idx
-	height_indice = 1 if motion_constants.UP_AXIS == "y" else 2
 
 	contact_frames_left = np.where(foot_contact[:,0])[0]
 	contact_frames_right = np.where(foot_contact[:,1])[0]
@@ -234,10 +233,6 @@ def update_height_offset(global_T, prev_offset, frame_start, return_contact_labe
 	update_contact_frame = -1
 
 	contact_foot_pos = None
-
-	# no contact for both
-	# if len(contact_frames_left) == 0 and len(contact_frames_right) == 0:
-	# 	return new_contact_height, update_contact_frame, foot_contact
 	
 	# only right
 	if len(contact_frames_left) == 0 and len(contact_frames_right) > 0:

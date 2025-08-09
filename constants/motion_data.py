@@ -177,8 +177,8 @@ SMPLX_FINGER_JOINTS = [
 
 NUM_JOINTS = len(JOINT_NAMES)
 
-UP_AXIS_EGOBODY = "z"  # Egobody uses y as up axis
-UP_AXIS_GIMO = "y"  # Gimo uses z as up axis
+UP_AXIS_EGOBODY = "y"  # Egobody uses y as up axis
+UP_AXIS_GIMO = "y"  # Gimo uses y as up axis
 
 UP_AXIS = "y"
 height_indice = 2 if UP_AXIS == "z" else 1
@@ -269,10 +269,6 @@ contact_vel_threshold = 0.008
 head_neck_joint_idx = [JOINT_NAMES.index("Head"), JOINT_NAMES.index("Neck")]
 
 head_joint_idx = JOINT_NAMES.index("Head")
-# path
-# REALDATA_PATH = "/data/realdata"
-# BASE_PATH = "/home/jiye/Desktop/TotalCapture"
-
 
 # for rendering smplx mesh
 # default hand pose
