@@ -298,26 +298,30 @@ def load_data_from_training(base_dir, file_list, setting = 'vr', debug=False, no
     # return global pos for FK loss calc
     global_p = normalized_global_T[...,:3,3]
 
+    tot_length = motion_local_T.shape[0]
 
+    return head_imu_input, ee_pos_v, output, global_p, local_T[...,:3,:3], head_start_T, c_lr, info_list, tot_length
 
-    return head_imu_input, ee_pos_v, output, global_p, local_T[...,:3,:3], head_start_T, c_lr, info_list, scene_points
-
-def load_data_with_args_train(file_list, args, mode = 'train'):
+def load_data_with_args_train(file_list, args, mode = 'train', save_name=None):
     data, total_len = load_data(file_list, base_dir=args.base_dir, setting=args.setting, mode = mode)            
-    with open(os.path.join(args.preprocess_path, f"{mode}_vr.pkl"), "wb") as f_write:
+    if save_name is not None:
+        write_path = os.path.join(args.preprocess_path, f'{save_name}_vr.pkl')
+    else:
+        write_path = os.path.join(args.preprocess_path, f'{mode}_vr.pkl')
+    with open(write_path, "wb") as f_write:
         pickle.dump(data, f_write, protocol=pickle.HIGHEST_PROTOCOL)
-    logging.info(f"Saved {mode} data with {total_len} sequences in {os.path.join(args.preprocess_path, f'{mode}.pkl')}")
+    logging.info(f"Saved {mode} data with {total_len} sequences in {write_path}")
 
 def load_data(file_list_total, base_dir = "", setting = 'vr', mode = 'train'):
     file_list = [f for f in file_list_total if f['mode'] == mode]
 
-    head_imu_input, ee_pos, output, global_p, local_rot, head_start, c_lr, info, scene_points = load_data_from_training(base_dir, file_list, setting = setting , normalization=True)
+    head_imu_input, ee_pos, output, global_p, local_rot, head_start, c_lr, info, tot_length= load_data_from_training(base_dir, file_list, setting = setting , normalization=True)
 
     # set necessary information to dictionary
     total, seq_len, _  = output.shape
     input_ = {}
     input_['input_seq'] = head_imu_input 
-    input_['mid_seq'] = ee_pos 
+    input_['mid_seq'] = ee_pos
     input_['tgt_seq'] = output 
     input_['global_p'] = global_p
     input_['root'] = global_p[..., 0, :] 
@@ -325,7 +329,7 @@ def load_data(file_list_total, base_dir = "", setting = 'vr', mode = 'train'):
     input_['head_start'] = head_start 
     input_['contact_label'] = c_lr
     input_['info'] = info
-    input_['scene_points'] = scene_points
+    input_['total_length'] = tot_length
 
     return input_, total
 
@@ -340,6 +344,7 @@ def parse_filenames_and_load(args):
     egobody_data_info = pd.read_csv(os.path.join(egobody_path, 'data_info_release.csv'))
     egobody_data_split_info = pd.read_csv(os.path.join(egobody_path, 'data_split.csv'))
     
+    # ===================== GIMO =====================
     # Aligned - GIMO
     fnames_list = (gimo_data_info['scene'].astype(str) + '/' + gimo_data_info['sequence_path'].astype(str)).tolist()
     start_end_list = list(zip(gimo_data_info['start_frame'].astype(int), gimo_data_info['end_frame'].astype(int)))
@@ -348,7 +353,9 @@ def parse_filenames_and_load(args):
     training = gimo_data_info['training']
     
     file_lists = []
-    for fnames, start_end, transform, scene, training in tqdm(zip(fnames_list, start_end_list, transform_info, scene_list, training)): # GIMO Dataset
+    file_list_gimo = []
+    file_list_egobody = []
+    for fnames, start_end, transform, scene, training in tqdm(zip(fnames_list, start_end_list, transform_info, scene_list, training), desc='load GIMO seqlists'): # GIMO Dataset
         seqlists = {}
         seqlists['fname'] = fnames
         seqlists['start_end'] = start_end
@@ -356,20 +363,23 @@ def parse_filenames_and_load(args):
         seqlists['transform'] = transform
         seqlists['file'] = [f for f in os.listdir(os.path.join(gimo_path, fnames, 'smplx_local')) if f.endswith('.pkl')]
         seqlists['file'].sort(key=lambda x: int(''.join(filter(str.isdigit, x))))
-        seqlists['mode'] = 'train' if training == 1 else 'val'
+        seqlists['mode'] = 'train' if training == 1 else 'test'     # NOTE
         seqlists['dataset'] = 'gimo'
         file_lists.append(seqlists) #NOTE: comment this line to debug Egobody
-   
+        file_list_gimo.append(seqlists)
+    
+
+    # ===================== EgoBody =====================
     fnames_list = (egobody_data_info['recording_name'].astype(str)).tolist()
     start_end_list = list(zip(egobody_data_info['start_frame'].astype(int), egobody_data_info['end_frame'].astype(int)))
     scene_list = (egobody_data_info['scene_name'].astype(str)).tolist()
  
-    for fnames, start_end, scene in tqdm(zip(fnames_list, start_end_list, scene_list)):
+    for fnames, start_end, scene in tqdm(zip(fnames_list, start_end_list, scene_list), desc='load egobody seqlists'):
         for col in egobody_data_split_info.columns:
             if bool((egobody_data_split_info[col] == fnames).any()):
-                mode = col 
+                mode = col
                 break
-        if mode == 'test' or mode == '': # we dont process test mode in this script
+        if mode == 'val' or mode == '': # NOTE we dont process VAL mode in this script
             continue
         seqlists = {}
         seqlists['fname'] = fnames
@@ -383,10 +393,14 @@ def parse_filenames_and_load(args):
         seqlists['mode'] = mode
         seqlists['dataset'] = 'egobody'
         file_lists.append(seqlists)
+        file_list_egobody.append(seqlists)
   
     load_data_with_args_train(file_list = file_lists, args=args, mode = 'train')
  
-    load_data_with_args_train(file_list = file_lists, args=args, mode = 'val')
+    load_data_with_args_train(file_list = file_lists, args=args, mode = 'test')
+
+    load_data_with_args_train(file_list = file_list_gimo, args=args, mode = 'test', save_name='test_gimo')
+    load_data_with_args_train(file_list = file_list_egobody, args=args, mode = 'test', save_name='test_egobody')
 
 if __name__ == "__main__":
     import torch.multiprocessing as mp

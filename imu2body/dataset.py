@@ -4,7 +4,6 @@ dir_path = os.path.dirname(os.path.realpath(__file__))
 parent_dir_path = os.path.abspath(os.path.join(dir_path, os.pardir))
 sys.path.append(parent_dir_path)
 
-import glob
 import numpy as np
 import pickle
 import torch
@@ -323,12 +322,43 @@ def get_loader_training(
     Returns:
         data_loader: data loader.
     """
-    training = 'train' if training == True else 'val'
-    dataset = TrainingDataset(data_root, training)
+
+    mode = 'train' if training == True else 'test'
+
+    if training:
+        dataset = TrainingDataset(data_root, mode)
+        data_loader = DataLoader(
+            # BUG num_workers
+            dataset=dataset, batch_size=batch_size, shuffle=True, num_workers=8, drop_last=drop_last
+        )
+    else:
+        data_loader = DataLoader(
+            # BUG num_workers
+            dataset=dataset, batch_size=batch_size, shuffle=False, num_workers=8, drop_last=drop_last
+        )
+    return data_loader
+
+def get_loader_validation(
+    data_root=None,
+    batch_size=16,
+    dataset=None,
+):
+    """Returns data loader for custom dataset.
+    Args:
+        dataset_path: path to pickled numpy dataset
+        device: Device in which data is loaded -- 'cpu' or 'cuda'
+        batch_size: mini-batch size.
+    Returns:
+        data_loader: data loader.
+    """
+    training = False
+    mode = 'test'
+
+    dataset = TrainingDataset(data_root, mode, test_only=True, test_dataset=dataset)
 
     data_loader = DataLoader(
         # BUG num_workers
-        dataset=dataset, batch_size=batch_size, shuffle=training, num_workers=8, drop_last=drop_last
+        dataset=dataset, batch_size=batch_size, shuffle=False, num_workers=8, drop_last=False
     )
     return data_loader
 
@@ -511,26 +541,6 @@ class GIMODataset(data.Dataset):
     def __len__(self):
         return self.imu_data['input_seq'].shape[0]
 
-    def parse_data_info(self):
-        self.sequences_path_list = []
-        self.scenes_path_list = []
-        self.trans_path_list = []
-        self.poses_path_list = []
-        self.start_end_list = []
-        for i, seq in enumerate(self.dataset_info['sequence_path']):
-            if self.dataset_info['training'][i] != self.train:
-                continue
-            start_frame = self.dataset_info['start_frame'][i]
-            end_frame = self.dataset_info['end_frame'][i]
-            scene = self.dataset_info['scene'][i]
-            transform = self.dataset_info['transformation'][i]
-            
-            self.poses_path_list.append(start_frame)
-            self.sequences_path_list.append(seq)
-            self.scenes_path_list.append(scene)
-            self.trans_path_list.append(transform)
-            self.start_end_list.append([self.dataset_info['start_frame'][i], self.dataset_info['end_frame'][i]])
-            
     def load_imu(self):
         self.imu_data = {}
         self.imu_seq_info = []  # 新增列表，记录每个seq的元数据和索引范围
@@ -618,13 +628,19 @@ def fast_load_obj_vertices(path):
     return np.array(vertices)
 
 class TrainingDataset(data.Dataset):
-    def __init__(self, dataroot, mode='training', imu_path='./preprocess_train_vr_new'):    # BUG preprocess_train_vr_old
+    def __init__(self, dataroot, mode='train', imu_path='./preprocess_train_vr_new',
+                test_only=False, test_dataset='gimo'):    # BUG preprocess_train_vr_old
         self.dataroot = dataroot
         self.gimo_dataroot = os.path.join(self.dataroot, 'GIMO') # for GIMO dataset
         self.egobody_dataroot = os.path.join(self.dataroot, 'Egobody_dataset') # for Egobody dataset
         self.mode = mode
         self.training = True if self.mode == 'train' else False
-        self.imu_path = os.path.join(imu_path, f'{mode}_vr.pkl')
+        self.test_only = test_only
+        if not self.test_only:
+            self.imu_path = os.path.join(imu_path, f'{mode}_vr.pkl')
+        else:
+            self.imu_path = os.path.join(imu_path, f'test_{test_dataset}_vr.pkl')
+
 
         # NOTE: Hard coded
         self.input_seq_len = 40
@@ -644,7 +660,7 @@ class TrainingDataset(data.Dataset):
         self.preprocessed_scene_dict = {}
 
         
-        self.parse_data_info()
+        # self.parse_data_info()
         self.load_imu()
         self.load_scene()
         self._precompute_sampled_scene_points()
@@ -805,6 +821,11 @@ class TrainingDataset(data.Dataset):
         # Input Images
         input_['imgs'] = imgs
         input_['dataset_name'] = info['dataset']
+
+        if self.test_only:
+            input_['total_length'] = self.imu_data['total_length'][index]
+            input_['info'] = info
+            input_['head_start'] = self.imu_data['head_start'][index]
   
         return input_
 
@@ -818,7 +839,7 @@ class TrainingDataset(data.Dataset):
         self.poses_path_list = []
         self.start_end_list = []
         for i, seq in enumerate(self.dataset_info_gimo['sequence_path']): # for GIMO dataset
-            if self.dataset_info_gimo['training'][i] != self.mode:
+            if self.dataset_info_gimo['training'][i] != self.training:
                 continue
             start_frame = self.dataset_info_gimo['start_frame'][i]
             scene = self.dataset_info_gimo['scene'][i]
@@ -844,8 +865,8 @@ class TrainingDataset(data.Dataset):
     def load_imu(self):
         with open(self.imu_path, 'rb') as f:
             self.imu_data = pickle.load(f)
-        if 'scene_points' not in self.imu_data:
-            self.imu_data['scene_points'] = []
+        # if 'scene_points' not in self.imu_data:
+        #     self.imu_data['scene_points'] = []
         print('IMU information load done')
                  
     def load_data_dict(self):

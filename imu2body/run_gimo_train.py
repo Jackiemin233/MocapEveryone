@@ -5,6 +5,7 @@ sys.path.append(parent_dir_path)
 import argparse
 from copy import deepcopy
 import logging
+import glob
 import numpy as np
 import random
 #os.environ["CUDA_VISIBLE_DEVICES"] = "5"
@@ -13,7 +14,7 @@ import torch.nn as nn
 import torch.optim as optim
 from IPython import embed 
 import yaml
-from dataset import *
+from dataset import get_loader_training, get_loader_validation
 from functions import *
 from pytorch3d import transforms
 import dadaptation
@@ -212,12 +213,19 @@ class IMU2BodyNetwork(object):
 
                 np.savez(self.directory+"x_mean_and_std", mean=self.x_mean, std=self.x_std)
     
-            else:
+            else:           # validation
                 is_train = False
                 batch_size = self.config['train']['batch_size']
                 self.dataloader[fname] = get_loader_training(data_root=data_root, \
                                                         batch_size=batch_size, \
                                                         training=is_train)
+                self.dataloader[f'{fname}_gimo'] = get_loader_validation(data_root=data_root, \
+                                                                    batch_size=batch_size, \
+                                                                    dataset='gimo')
+                self.dataloader[f'{fname}_egobody'] = get_loader_validation(data_root=data_root, \
+                                                                    batch_size=batch_size, \
+                                                                    dataset='egobody')
+                
     
         # convert to tensor for future calculations
         self.mean = torch.from_numpy(self.mean).to(self.device)
@@ -225,54 +233,6 @@ class IMU2BodyNetwork(object):
         self.x_mean = torch.from_numpy(self.x_mean).to(self.device)
         self.x_std = torch.from_numpy(self.x_std).to(self.device).view(1, 1, motion_constants.NUM_JOINTS, 3)
  
-    def load_data(self):
-        is_train = False
-
-        fnames = [self.mode]
-        if self.mode == "train":
-            fnames.append("validation")
-            is_train = True
-
-        self.dataloader = {}
-        if is_train is False:
-            data = np.load(self.directory + "mean_and_std.npz")
-            self.mean = data['mean']
-            self.std = data['std']
-
-            x_data = np.load(self.directory + "x_mean_and_std.npz")
-            self.x_mean = x_data['mean']
-            self.x_std = x_data['std']
-   
-        for fname in fnames:
-            if fname == "train":
-                batch_size = self.config['train']['batch_size']
-                train_fnames = [os.path.join(self.data_path, f"train_{i+1}.pkl") for i in range(5)] # TODO fix so automatically would be all read
-                self.dataloader[fname] = get_loader(dataset_path=train_fnames, \
-                                                batch_size=batch_size, \
-                                                device=self.device, \
-                                                shuffle=is_train)
-                self.mean = self.dataloader['train'].dataset.mean
-                self.std = self.dataloader['train'].dataset.std 
-                np.savez(self.directory+"mean_and_std", mean=self.mean, std=self.std)
-
-                self.x_mean, self.x_std = self.dataloader['train'].dataset.get_x_mean_and_std() 
-                np.savez(self.directory+"x_mean_and_std", mean=self.x_mean, std=self.x_std)
-
-            else:
-                batch_size = self.config['train']['batch_size'] if fname == "validation" else self.config['test']['batch_size']
-                self.dataloader[fname] = get_loader(dataset_path=os.path.join(self.data_path, f"{fname}.pkl"), \
-                                                batch_size=batch_size, \
-                                                device=self.device, \
-                                                mean = self.mean, \
-                                                std = self.std,
-                                                shuffle=is_train)
-
-        # convert to tensor for future calculations
-        self.mean = torch.from_numpy(self.mean).to(self.device)
-        self.std = torch.from_numpy(self.std).to(self.device)
-        self.x_mean = torch.from_numpy(self.x_mean).to(self.device)
-        self.x_std = torch.from_numpy(self.x_std).to(self.device).view(1, 1, motion_constants.NUM_JOINTS, 3)
-
     def build_network(self):
 
         logging.info(f"Loading model...")
@@ -392,7 +352,8 @@ class IMU2BodyNetwork(object):
         self.writer = SummaryWriter(self.log_dir)
         logging.info("Training model...")
         torch.autograd.set_detect_anomaly(True)
-
+        
+        self.eval()
         self.loss_total_min = 100000
         self.train_epoch = 0
         for epoch in range(self.config['train']['num_epoch']):
@@ -675,14 +636,16 @@ class IMU2BodyNetwork(object):
         render_result_dict['idx'] = []
         render_result_dict['motion'] = []
 
-        for i, filepath in tqdm(enumerate(self.eval_files_gimo)):
-            with open(filepath, "rb") as file:
-                file_dict = pickle.load(file)
-                file_dict.update({"filename": filepath})
-            if i == 0:
-                eval_log_per_file = self.run_per_file(file_dict=file_dict, save_name = 'gimo_eval.ply')
-            else: 
-                eval_log_per_file = self.run_per_file(file_dict=file_dict, save_name = None)
+        # for i, filepath in tqdm(enumerate(self.eval_files_gimo)):
+        #     with open(filepath, "rb") as file:
+        #         file_dict = pickle.load(file)
+        #         file_dict.update({"filename": filepath})
+        #     if i == 0:
+        #         eval_log_per_file = self.run_per_file(file_dict=file_dict, save_name = 'gimo_eval.ply')
+        #     else: 
+        #         eval_log_per_file = self.run_per_file(file_dict=file_dict, save_name = None)
+        for iterations, sampled_batch in enumerate(tqdm(self.dataloader['validation_gimo'])):
+            eval_log_per_file = self.run_per_file(file_dict=sampled_batch, save_name = None)
             # if self.load_vis:
             # 	render_result_dict['motion'].append(eval_log_per_file['motion'])
             # 	render_result_dict['seq_len'].append(eval_log_per_file['motion'][0].num_frames())
@@ -696,20 +659,22 @@ class IMU2BodyNetwork(object):
         print(f"Done.")
         logging.info(f"-----------------------GIMO EVAL RESULT-----------------------------------------------")
         for metric in self.eval_metric:
-            # if 'jitter' in metric:
-            #     continue
+            if 'jitter' in metric:
+                continue
             print(f"metric: {metric} value: {np.mean(np.array(self.eval_log[metric])) * metrics_coeffs[metric]:.2f}")
-        print(f"metric: pred/gt jitter value: {np.mean(np.array(self.eval_log['pred_jitter'])) / np.mean(np.array(self.eval_log['gt_jitter'])):.2f}")
+        print(f"metric: jitter value: {np.mean(np.array(self.eval_log['pred_jitter'])) / np.mean(np.array(self.eval_log['gt_jitter'])):.2f}")
         logging.info(f"--------------------------------------------------------------------------------------")
   
-        for i, filepath in tqdm(enumerate(self.eval_files_egobody)):
-            with open(filepath, "rb") as file:
-                file_dict = pickle.load(file)
-                file_dict.update({"filename": filepath})
-            if i == 0:
-                eval_log_per_file = self.run_per_file(file_dict=file_dict, save_name = 'egobody_eval.ply')
-            else: 
-                eval_log_per_file = self.run_per_file(file_dict=file_dict, save_name = None)
+        # for i, filepath in tqdm(enumerate(self.eval_files_egobody)):
+        #     with open(filepath, "rb") as file:
+        #         file_dict = pickle.load(file)
+        #         file_dict.update({"filename": filepath})
+        #     if i == 0:
+        #         eval_log_per_file = self.run_per_file(file_dict=file_dict, save_name = 'egobody_eval.ply')
+        #     else: 
+        #         eval_log_per_file = self.run_per_file(file_dict=file_dict, save_name = None
+        for iterations, sampled_batch in enumerate(tqdm(self.dataloader['validation_egobody'])):
+            eval_log_per_file = self.run_per_file(file_dict=sampled_batch, save_name = None)
             # if self.load_vis:
             # 	render_result_dict['motion'].append(eval_log_per_file['motion'])
             # 	render_result_dict['seq_len'].append(eval_log_per_file['motion'][0].num_frames())
@@ -723,8 +688,8 @@ class IMU2BodyNetwork(object):
         print(f"Done.")
         logging.info(f"-----------------------Egobody EVAL RESULT--------------------------------------------")
         for metric in self.eval_metric:
-            # if 'jitter' in metric:
-            #     continue
+            if 'jitter' in metric:
+                continue
             print(f"metric: {metric} value: {np.mean(np.array(self.eval_log[metric])) * metrics_coeffs[metric]:.2f}")
         print(f"metric: jitter value: {np.mean(np.array(self.eval_log['pred_jitter'])) / np.mean(np.array(self.eval_log['gt_jitter'])):.2f}")
         logging.info(f"--------------------------------------------------------------------------------------")
@@ -739,11 +704,17 @@ class IMU2BodyNetwork(object):
         gt_rot = torch.zeros(size=(total_length, motion_constants.NUM_JOINTS, 3, 3))
 
         input_seq = sampled_batch['input_seq'].to(self.device)
+
+        input_img = sampled_batch['imgs']#.to(self.device)
+        input_pc = sampled_batch['scene_points']#.to(self.device)
+
+        # env = self.encode_scene(input_pc) if self.scene_encoder else None
+        
   
         # norm_input
         input_seq = (input_seq - self.mean) / self.std 
   
-        output_tuple = self.model(input_seq.float())
+        output_tuple = self.model(input_seq, input_pc = input_pc) # hand (mid), foot, final_output (body)
   
         results = self.get_loss_eval(output_tuple=output_tuple, gt_tuple=sampled_batch, \
                                     get_results=False, \
