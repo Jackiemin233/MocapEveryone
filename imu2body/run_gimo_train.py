@@ -709,7 +709,7 @@ class IMU2BodyNetwork(object):
 
         input_seq = sampled_batch['input_seq'].to(self.device)
         input_img = None
-        input_pc = sampled_batch['scene_points']#.to(self.device)
+        input_pc = sampled_batch['scene_points'].to(self.device)
   
         # norm_input
         input_seq = (input_seq - self.mean) / self.std 
@@ -757,6 +757,10 @@ class IMU2BodyNetwork(object):
             predicted_rot[start_frame:start_frame+seq_len] = pred_rotmat[idx]
             gt_position[start_frame:start_frame+seq_len] = gt_pos_to_world[idx]
             gt_rot[start_frame:start_frame+seq_len] = gt_rotmat[idx]
+        # predicted_position[-1] = pred_pos_to_world[idx][-1]
+        # predicted_rot[-1] = pred_rotmat[idx][-1]
+        # gt_position[-1] = gt_pos_to_world[idx][-1]
+        # gt_rot[-1] = gt_rotmat[idx][-1]
 
         predicted_angle_np = conversions.R2A(predicted_rot.cpu().numpy())
         predicted_angle = torch.from_numpy(predicted_angle_np).cuda().float()

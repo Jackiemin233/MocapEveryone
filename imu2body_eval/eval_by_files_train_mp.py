@@ -130,9 +130,9 @@ def load_data_from_training(base_dir, file, scene_list, setting = 'vr', gimo_dat
         filepath_list = [os.path.join(base_dir, 'GIMO', seq['fname'], 'smplx_local', file) for file in seq['file']]
         transform_info = json.load(open(os.path.join(base_dir, 'GIMO', seq['fname'], seq['transform']), 'r')) # pose to scene transformation
         transform_norm = np.loadtxt(os.path.join(base_dir, 'GIMO', seq['fname'], '../', 'scene_obj', 'transform_norm.txt')).reshape((4, 4))
-        # start, end = seq['start_end'][0], seq['start_end'][1]
         # scene (pose) normalization transformation
-        pkl_files = [f for f in filepath_list if f.endswith('.pkl')]
+        # pkl_files = [f for f in filepath_list if f.endswith('.pkl')]
+        pkl_files = [f for f in filepath_list if f.endswith('.pkl')][seq['start_end'][0] : seq['start_end'][1]]
 
     elif seq['dataset'] == 'egobody':
         pkl_files = [os.path.join(base_dir, 'Egobody_dataset', f"smplx_camera_wearer_{seq['mode']}", seq['fname'], seq['body_index'], 'results', file, '000.pkl') for file in seq['file']]
@@ -418,7 +418,8 @@ def load_filelist(args):
                 continue
             seqlists = {}
             seqlists['fname'] = fnames
-            seqlists['start_end'] = start_end
+            seqlists['start_end_origin'] = start_end
+            seqlists['start_end'] = (0, start_end[1]-start_end[0])
             seqlists['scene'] = scene
             seqlists['transform'] = transform
             seqlists['file'] = [f for f in os.listdir(os.path.join(gimo_path, fnames, 'smplx_local')) if f.endswith('.pkl')]
@@ -442,11 +443,13 @@ def load_filelist(args):
             seqlists = {}
             seqlists['fname'] = fnames
             seqlists['scene'] = scene
-            seqlists['start_end'] = start_end
+            seqlists['start_end_origin'] = start_end
+            seqlists['start_end'] = (0, start_end[1]-start_end[0]+1)
             seqlists['transform'] = None
             seqlists['body_index'] = os.listdir(os.path.join(egobody_path, f'smplx_camera_wearer_{mode}', fnames))[0]
             seqlists['file'] = [f for f in os.listdir(os.path.join(egobody_path, f'smplx_camera_wearer_{mode}', fnames, seqlists['body_index'], 'results'))]
             seqlists['file'].sort(key=lambda x: int(''.join(filter(str.isdigit, x))))
+            assert str(start_end[0]) in seqlists['file'][0] and str(start_end[1]) in seqlists['file'][-1]
             seqlists['mode'] = 'test'
             seqlists['dataset'] = 'egobody'
             file_lists.append(seqlists)
@@ -466,10 +469,6 @@ def load_filelist(args):
         if args.num_processes > 1:
             print(f"使用 {args.num_processes} 个进程进行并行处理...")
             
-            # 设置多进程启动方法（在macOS上避免问题）
-            if sys.platform == 'darwin':
-                mp.set_start_method('spawn', force=True)
-            
             # 创建进程池
             try:
                 with mp.Pool(processes=args.num_processes) as pool:
@@ -477,6 +476,7 @@ def load_filelist(args):
                     process_func = partial(
                         load_data_from_training,
                         base_dir=args.base_dir,
+                        file=file,
                         scene_list=ds_scene_list,
                         gimo_dataroot=gimo_path,
                         egobody_dataroot=egobody_path,
