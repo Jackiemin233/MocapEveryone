@@ -202,7 +202,8 @@ class IMU2BodyNetwork(object):
                 batch_size = self.config['train']['batch_size']
                 self.dataloader[fname] = get_loader_training(data_root=data_root, \
                                                         batch_size=batch_size, \
-                                                        training=is_train)
+                                                        training=is_train,
+                                                        num_workers=self.config['train']['num_workers'])
                 self.mean = self.dataloader['train'].dataset.mean
                 self.std = self.dataloader['train'].dataset.std 
     
@@ -218,20 +219,23 @@ class IMU2BodyNetwork(object):
                 batch_size = self.config['train']['batch_size']
                 self.dataloader[fname] = get_loader_training(data_root=data_root, \
                                                         batch_size=batch_size, \
-                                                        training=is_train)
-                self.dataloader[f'{fname}_gimo'] = get_loader_validation(data_root=data_root, \
-                                                                    batch_size=batch_size, \
-                                                                    dataset='gimo')
-                self.dataloader[f'{fname}_egobody'] = get_loader_validation(data_root=data_root, \
-                                                                    batch_size=batch_size, \
-                                                                    dataset='egobody')
+                                                        training=is_train,
+                                                        num_workers=self.config['train']['num_workers'])
+                # self.dataloader[f'{fname}_gimo'] = get_loader_validation(data_root=data_root, \
+                #                                                     batch_size=batch_size, \
+                #                                                     dataset='gimo',
+                #                                                     num_workers=self.config['train']['num_workers'])
+                # self.dataloader[f'{fname}_egobody'] = get_loader_validation(data_root=data_root, \
+                #                                                     batch_size=batch_size, \
+                #                                                     dataset='egobody',
+                #                                                     num_workers=self.config['train']['num_workers'])
                 
     
         # convert to tensor for future calculations
-        self.mean = torch.from_numpy(self.mean).to(self.device)
-        self.std = torch.from_numpy(self.std).to(self.device)
-        self.x_mean = torch.from_numpy(self.x_mean).to(self.device)
-        self.x_std = torch.from_numpy(self.x_std).to(self.device).view(1, 1, motion_constants.NUM_JOINTS, 3)
+        self.mean = torch.from_numpy(self.mean).to(self.device, dtype=torch.float32)
+        self.std = torch.from_numpy(self.std).to(self.device, dtype=torch.float32)
+        self.x_mean = torch.from_numpy(self.x_mean).to(self.device, dtype=torch.float32)
+        self.x_std = torch.from_numpy(self.x_std).to(self.device, dtype=torch.float32).view(1, 1, motion_constants.NUM_JOINTS, 3)
  
     def build_network(self):
 
@@ -636,16 +640,16 @@ class IMU2BodyNetwork(object):
         render_result_dict['idx'] = []
         render_result_dict['motion'] = []
 
-        # for i, filepath in tqdm(enumerate(self.eval_files_gimo)):
-        #     with open(filepath, "rb") as file:
-        #         file_dict = pickle.load(file)
-        #         file_dict.update({"filename": filepath})
-        #     if i == 0:
-        #         eval_log_per_file = self.run_per_file(file_dict=file_dict, save_name = 'gimo_eval.ply')
-        #     else: 
-        #         eval_log_per_file = self.run_per_file(file_dict=file_dict, save_name = None)
-        for iterations, sampled_batch in enumerate(tqdm(self.dataloader['validation_gimo'])):
-            eval_log_per_file = self.run_per_file(file_dict=sampled_batch, save_name = None)
+        for i, filepath in tqdm(enumerate(self.eval_files_gimo)):
+            with open(filepath, "rb") as file:
+                file_dict = pickle.load(file)
+                file_dict.update({"filename": filepath})
+            if i == 0:
+                eval_log_per_file = self.run_per_file(file_dict=file_dict, save_name = 'gimo_eval.ply')
+            else: 
+                eval_log_per_file = self.run_per_file(file_dict=file_dict, save_name = None)
+        # for iterations, sampled_batch in enumerate(tqdm(self.dataloader['validation_gimo'])):
+        #     eval_log_per_file = self.run_per_file(file_dict=sampled_batch, save_name = None)
             # if self.load_vis:
             # 	render_result_dict['motion'].append(eval_log_per_file['motion'])
             # 	render_result_dict['seq_len'].append(eval_log_per_file['motion'][0].num_frames())
@@ -665,16 +669,16 @@ class IMU2BodyNetwork(object):
         print(f"metric: jitter value: {np.mean(np.array(self.eval_log['pred_jitter'])) / np.mean(np.array(self.eval_log['gt_jitter'])):.2f}")
         logging.info(f"--------------------------------------------------------------------------------------")
   
-        # for i, filepath in tqdm(enumerate(self.eval_files_egobody)):
-        #     with open(filepath, "rb") as file:
-        #         file_dict = pickle.load(file)
-        #         file_dict.update({"filename": filepath})
-        #     if i == 0:
-        #         eval_log_per_file = self.run_per_file(file_dict=file_dict, save_name = 'egobody_eval.ply')
-        #     else: 
-        #         eval_log_per_file = self.run_per_file(file_dict=file_dict, save_name = None
-        for iterations, sampled_batch in enumerate(tqdm(self.dataloader['validation_egobody'])):
-            eval_log_per_file = self.run_per_file(file_dict=sampled_batch, save_name = None)
+        for i, filepath in tqdm(enumerate(self.eval_files_egobody)):
+            with open(filepath, "rb") as file:
+                file_dict = pickle.load(file)
+                file_dict.update({"filename": filepath})
+            if i == 0:
+                eval_log_per_file = self.run_per_file(file_dict=file_dict, save_name = 'egobody_eval.ply')
+            else: 
+                eval_log_per_file = self.run_per_file(file_dict=file_dict, save_name = None)
+        # for iterations, sampled_batch in enumerate(tqdm(self.dataloader['validation_egobody'])):
+            # eval_log_per_file = self.run_per_file(file_dict=sampled_batch, save_name = None)
             # if self.load_vis:
             # 	render_result_dict['motion'].append(eval_log_per_file['motion'])
             # 	render_result_dict['seq_len'].append(eval_log_per_file['motion'][0].num_frames())
@@ -704,23 +708,19 @@ class IMU2BodyNetwork(object):
         gt_rot = torch.zeros(size=(total_length, motion_constants.NUM_JOINTS, 3, 3))
 
         input_seq = sampled_batch['input_seq'].to(self.device)
-
-        input_img = sampled_batch['imgs']#.to(self.device)
+        input_img = None
         input_pc = sampled_batch['scene_points']#.to(self.device)
-
-        # env = self.encode_scene(input_pc) if self.scene_encoder else None
-        
   
         # norm_input
         input_seq = (input_seq - self.mean) / self.std 
   
-        output_tuple = self.model(input_seq, input_pc = input_pc) # hand (mid), foot, final_output (body)
+        output_tuple = self.model(input_seq.float(), input_img = input_img, input_pc = input_pc)
   
         results = self.get_loss_eval(output_tuple=output_tuple, gt_tuple=sampled_batch, \
                                     get_results=False, \
                                     get_loss=True, \
                                     is_eval=True) 
-            
+        
         start_T = sampled_batch['head_start'].to(self.device) # Start pos
 
         # get pred into world coord

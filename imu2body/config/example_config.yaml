@@ -33,6 +33,7 @@ train:
     pretrained: ''
     save_frequency: 4
     loss: "l1"
+    num_workers: 0
     
 
 test:

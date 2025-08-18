@@ -10,7 +10,8 @@
                 "--data-config-path=./data_config/",
                 "--base-dir=../MocapEvery_Files_Download/",
                 "--save-path=../MocapEvery_Files_Download",
-                "--data-type=train"
+                "--data-type=train",
+                "--setting=vr"
             ],
             "cwd": "${workspaceFolder}/imu2body_eval",
             "justMyCode": true

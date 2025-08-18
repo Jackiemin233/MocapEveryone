@@ -820,3 +820,75 @@ def save_two_pointclouds_with_colors(pc1: torch.Tensor, pc2: torch.Tensor, filen
     # 可视化（可选）
     o3d.visualization.draw_geometries([pcd])
 
+def xyz_to_transform_matrices(points):
+    """
+    将点云xyz坐标转换为变换矩阵格式
+    
+    参数:
+    points -- 形状为(N, 3)的numpy数组,包含N个点的xyz坐标
+    
+    返回:
+    形状为(N, 4, 4)的numpy数组, 每个4x4矩阵表示一个点的变换矩阵
+    """
+    n = points.shape[0]
+    
+    # 创建单位矩阵作为基础
+    transforms = np.tile(np.eye(4), (n, 1, 1))
+    
+    # 将xyz坐标设置到平移部分
+    transforms[:, :3, 3] = points
+    
+    return transforms
+
+def transform_matrices_to_xyz(transforms):
+    """
+    将变换矩阵格式转换回点云xyz坐标
+    
+    参数:
+    transforms -- 形状为(N, 4, 4)的numpy数组,每个4x4矩阵表示一个点的变换矩阵
+    
+    返回:
+    形状为(N, 3)的numpy数组,包含N个点的xyz坐标
+    """
+    # 直接从每个变换矩阵的平移部分提取xyz坐标
+    return transforms[:, :3, 3]
+
+def downsample_point_cloud(points: np.ndarray, target_num: int) -> np.ndarray:
+    num_points = len(points)
+
+    if num_points == 0:
+        # 全部点为空，直接返回 zeros
+        return np.zeros((target_num, 3), dtype=np.float32)
+
+    if num_points >= target_num:
+        # 随机下采样
+        indices = np.random.choice(num_points, target_num, replace=False)
+        return points[indices]
+    else:
+        # BUG 不足，重复补齐
+        # print(f"Points {num_points} less than {target_num}")
+        repeat_count = target_num // num_points + 1
+        padded = np.tile(points, (repeat_count, 1))
+        return padded[:target_num]
+
+def extract_points_in_bbox(point_cloud, centers, radius, cxt_num_points):
+    assert centers.ndim == 2 and centers.shape[1] == 3, "中心点序列必须是 (N, 3) 形状"
+    all_cropped = []
+    for center in centers[::20]:
+        lower = center - radius
+        upper = center + radius
+        mask = np.all((point_cloud >= lower) & (point_cloud <= upper), axis=1)
+        cropped = point_cloud[mask]
+        if len(cropped) > 0:
+            all_cropped.append(cropped)
+    if len(all_cropped) == 0:
+        # 没有采到点，直接用中心点补齐
+        concatenated = np.tile(centers[0], (cxt_num_points, 1))
+    else:
+        concatenated = np.vstack(all_cropped)
+        # 去重
+        concatenated = np.unique(concatenated, axis=0)
+    # 下采样
+    final_points = downsample_point_cloud(concatenated, cxt_num_points)
+    return final_points
+

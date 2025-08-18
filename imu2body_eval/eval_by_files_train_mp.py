@@ -384,7 +384,7 @@ def load_data_from_training(base_dir, file, scene_list, setting = 'vr', gimo_dat
     result_dict['scene_points'] = torch.from_numpy(np.stack(out)).float()
 
     # vis
-    vis_points(out, global_p, 0)
+    # vis_points(out, global_p, 0)
     
 
     # save
@@ -425,7 +425,7 @@ def load_filelist(args):
             seqlists['file'].sort(key=lambda x: int(''.join(filter(str.isdigit, x))))
             seqlists['mode'] = 'test'
             seqlists['dataset'] = 'gimo'
-            # file_lists.append(seqlists) #NOTE: comment this line to debug Egobody
+            file_lists.append(seqlists) #NOTE: comment this line to debug Egobody
 
         # ===================== EgoBody =====================
         fnames_list = (egobody_data_info['recording_name'].astype(str)).tolist()
@@ -457,11 +457,68 @@ def load_filelist(args):
         os.makedirs(os.path.join(args.save_path, 'gimo_test'), exist_ok=True)
         os.makedirs(os.path.join(args.save_path, 'egobody_test'), exist_ok=True)
 
-        for file in tqdm(file_lists, desc="Writing preprocessed file lists"):
-            load_data_from_training(base_dir = args.base_dir, file = file, scene_list=ds_scene_list, 
-                                    gimo_dataroot=gimo_path, egobody_dataroot=egobody_path,
-                                    normalization = True, setting = args.setting)
+        # for file in tqdm(file_lists, desc="Writing preprocessed file lists"):
+        #     load_data_from_training(base_dir = args.base_dir, file = file, scene_list=ds_scene_list, 
+        #                             gimo_dataroot=gimo_path, egobody_dataroot=egobody_path,
+        #                             normalization = True, setting = args.setting)
         
+        # 使用多进程加速处理
+        if args.num_processes > 1:
+            print(f"使用 {args.num_processes} 个进程进行并行处理...")
+            
+            # 设置多进程启动方法（在macOS上避免问题）
+            if sys.platform == 'darwin':
+                mp.set_start_method('spawn', force=True)
+            
+            # 创建进程池
+            try:
+                with mp.Pool(processes=args.num_processes) as pool:
+                    # 创建偏函数，固定其他参数
+                    process_func = partial(
+                        load_data_from_training,
+                        base_dir=args.base_dir,
+                        scene_list=ds_scene_list,
+                        gimo_dataroot=gimo_path,
+                        egobody_dataroot=egobody_path,
+                        normalization=True,
+                        setting=args.setting,
+                        save_path=args.save_path
+                    )
+                    
+                    # 使用进程池并行处理
+                    list(tqdm(
+                        pool.imap(process_func, file_lists),
+                        total=len(file_lists),
+                        desc="Writing preprocessed file lists (multiprocessing)"
+                    ))
+            except Exception as e:
+                print(f"多进程处理失败，回退到单进程: {e}")
+                # 回退到单进程处理
+                for file in tqdm(file_lists, desc="Writing preprocessed file lists (fallback)"):
+                    load_data_from_training(
+                        base_dir=args.base_dir,
+                        file=file,
+                        scene_list=ds_scene_list,
+                        gimo_dataroot=gimo_path,
+                        egobody_dataroot=egobody_path,
+                        normalization=True,
+                        setting=args.setting,
+                        save_path=args.save_path
+                    )
+        else:
+            # 单进程处理（原始方式）
+            for file in tqdm(file_lists, desc="Writing preprocessed file lists"):
+                load_data_from_training(
+                    base_dir=args.base_dir,
+                    file=file,
+                    scene_list=ds_scene_list,
+                    gimo_dataroot=gimo_path,
+                    egobody_dataroot=egobody_path,
+                    normalization=True,
+                    setting=args.setting,
+                    save_path=args.save_path
+                )
+
 def get_optimal_process_count():
     """获取最优的进程数量"""
     cpu_count = mp.cpu_count()
@@ -500,6 +557,17 @@ if __name__ == "__main__":
         default ='vr',
         choices = ['vr', 'hmc']
     )
+    parser.add_argument(
+        "--num-processes",
+        type=int,
+        default=get_optimal_process_count(),
+        help=f"Number of processes to use for multiprocessing. Default: {get_optimal_process_count()} (75% of CPU cores)"
+    )
+
     args = parser.parse_args()
-        
+    
+    # 显示系统信息
+    print(f"系统CPU核心数: {mp.cpu_count()}")
+    print(f"将使用进程数: {args.num_processes}")
+    
     load_filelist(args=args)

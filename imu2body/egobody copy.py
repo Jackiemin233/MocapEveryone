@@ -87,7 +87,7 @@ def bvh_to_amass_motion(bvh_filename, amass_skel):
 		motion_resampled = motion_ops.resample(amass_motion, fps=motion_constants.FPS)
 	elif fps == motion_constants.FPS:
 		motion_resampled = amass_motion
-	motion_adjust_height, foot_offset = motion_ops.adjust_height(motion_resampled, height_axis=motion_constants.UP_AXIS, pivot=motion_constants.contact_pivot)
+	motion_adjust_height, foot_offset = motion_ops.adjust_height(motion_resampled, height_axis=motion_constants.UP_AXIS_EGOBODY, pivot=motion_constants.contact_pivot)
 	return motion_adjust_height
 
 def create_skeleton_from_amass_bodymodel(bm, betas=None):
@@ -195,7 +195,7 @@ def create_motion_from_egobody_data(filename, bm, transform_info = None, transfo
 				)
 			pose_data.append(T)
 		motion.add_one_frame(pose_data)
-	
+
 	if fps % motion_constants.FPS == 0:
 		stride = int(fps / motion_constants.FPS)
 		motion_resampled = motion
@@ -206,14 +206,10 @@ def create_motion_from_egobody_data(filename, bm, transform_info = None, transfo
 	elif fps == motion_constants.FPS:
 		motion_resampled = motion
 	return motion_resampled
-	# motion_adjust_height, foot_offset = motion_ops.adjust_height(motion_resampled, height_axis=motion_constants.UP_AXIS_EGOBODY, pivot=motion_constants.contact_pivot)
-
-	# motion_resampled = motion_ops.resample(motion, fps=motion_constants.FPS) if fps != motion_constants.FPS else motion 
-	# motion_adjust_height, foot_offset = motion_ops.adjust_height(motion_resampled, height_axis=motion_constants.UP_AXIS, pivot=motion_constants.contact_pivot)
-	# return motion_adjust_height
+	#motion_adjust_height, foot_offset = motion_ops.adjust_height(motion_resampled, height_axis=motion_constants.UP_AXIS_EGOBODY, pivot=motion_constants.contact_pivot)
+	#return motion_adjust_height
 
 def create_mesh_from_amass_fairmotion(motion, bm, offset=None, betas=None):
-
 	if offset is None: # offset with default betas
 		offset = np.array([ 0.00312326, -0.35140747,  0.01203655])
 
@@ -331,7 +327,7 @@ def create_tpose(bm_path, default_beta=True):
 	for frame in range(pose_body.shape[0]):
 		pose_body_frame = pose_body[frame]
 		root_orient_frame = root_orient[frame]
-		root_trans_frame = trans[frame] # BUG + offset # add offset 
+		root_trans_frame = trans[frame] # + offset # add offset 
 		pose_data = []
 		for j in range(num_joints):
 			if j == 0:
@@ -356,6 +352,26 @@ def create_tpose(bm_path, default_beta=True):
 	# motion_adjust_height, foot_offset = motion_ops.adjust_height(motion_resampled, height_axis=motion_constants.UP_AXIS)
 	
 	# return motion_adjust_height
+
+
+
+def load(file, bm=None, bm_path=None, load_motion=True, load_mesh=False):
+	if bm is None:
+		assert bm_path is not None, "Please provide SMPL body model path"
+		bm = load_body_model(bm_path)
+	motion_sequence =  create_motion_from_amass_data(
+		filename=file, bm=bm, load_motion=load_motion)
+	mesh_sequence = None if not load_mesh else create_mesh_from_amass_data(file, bm=bm)
+	return motion_sequence, mesh_sequence
+
+
+def save():
+	raise NotImplementedError("Using bvh.save() is recommended")
+
+
+def load_parallel(files, cpus=20, **kwargs):
+	return utils.run_parallel(load, files, num_cpus=cpus, **kwargs)
+
 
 if __name__ == "__main__":
 	bm_path = "../data/smpl_models/smplx/SMPLX_NEUTRAL.npz"

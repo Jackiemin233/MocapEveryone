@@ -97,7 +97,7 @@ def process_sequence(seq, base_dir, cur_bm_type='smplx'):
 
 
 
-def load_data_from_training(base_dir, file_list, setting = 'vr', debug=False, normalization = False):
+def load_data_from_training(base_dir, file_list, setting = 'vr', debug=False, normalization = False, mode='train'):
     logging.info(f"Start loading {len(file_list)} sequences with multiprocessing...")
 
     try:
@@ -155,18 +155,18 @@ def load_data_from_training(base_dir, file_list, setting = 'vr', debug=False, no
 
     # constants
     window = motion_constants.preprocess_window
-    offset = motion_constants.preprocess_offset
+    offset = motion_constants.preprocess_offset if mode=='train' else motion_constants.preprocess_window
  
     is_custom_run = False
     for motion, info in tqdm(zip(motion_list, data_set_info)):
-        height_indice = 1 if info['dataset'] == 'gimo' else 2 # y for GIMO and z for egobody
+        height_indice = 1 # y for GIMO and y for egobody
         if motion is None or motion.num_frames() < window:
             continue
         motion_local_T = motion.to_matrix()
         motion_global_T = motion.to_matrix(local=False)
         motion_imu_rot, motion_imu_acc = imu.imu_from_global_T(motion_global_T, imu_joint_idx)
 
-        # set contact/height offset 
+        # set contact/height offset
         height_offset = 0.0
         contact_frame = 0
         contact = {}
@@ -176,8 +176,10 @@ def load_data_from_training(base_dir, file_list, setting = 'vr', debug=False, no
         start_frame, end_frame = info['start_end'][0], info['start_end'][1] #[242, 528]
         i = start_frame
         while True:
-            if i+window > end_frame:
+            if i > end_frame:
                 break
+            if i + window >= end_frame:
+                i = end_frame - window
             else:
                 local_T_window = motion_local_T[i: i+window]
                 global_T_window = motion_global_T[i: i+window]
@@ -188,11 +190,11 @@ def load_data_from_training(base_dir, file_list, setting = 'vr', debug=False, no
             local_T_window_height_adjust = deepcopy(local_T_window)
             global_T_window_height_adjust = deepcopy(global_T_window)
 
-            if not is_custom_run:
-                _, cur_height_offset = get_height_offset_current_frame(contact_dict=contact, cur_frame=i)
-                if abs(cur_height_offset) > 0:
-                    local_T_window_height_adjust[:, 0, height_indice, 3] -= cur_height_offset
-                    global_T_window_height_adjust[..., height_indice, 3] -= cur_height_offset
+            # if not is_custom_run:         # NOTE
+            #     _, cur_height_offset = get_height_offset_current_frame(contact_dict=contact, cur_frame=i)
+            #     if abs(cur_height_offset) > 0:
+            #         local_T_window_height_adjust[:, 0, height_indice, 3] -= cur_height_offset
+            #         global_T_window_height_adjust[..., height_indice, 3] -= cur_height_offset
 
             # record
             local_T.append(local_T_window_height_adjust)
@@ -206,9 +208,8 @@ def load_data_from_training(base_dir, file_list, setting = 'vr', debug=False, no
                 'dataset': info['dataset'],
                 'transform': info['transform']
             })
-
             i += offset
-            if not is_custom_run:
+            if not is_custom_run and mode == 'train':
                 # update floor for next window
                 result_dict = update_height_offset(global_T=global_T_window, prev_offset=height_offset, frame_start=i, return_contact_labels=True)
 
@@ -281,7 +282,7 @@ def load_data_from_training(base_dir, file_list, setting = 'vr', debug=False, no
         normalized_head = T_to_6d_and_pos(normalized_global_T[..., head_idx, :, :]) # Head position 
         head_imu_input = np.concatenate((head_height, head_upvec, normalized_head, normalized_imu_concat), axis=-1) 
     # [1, 3, 6+3]
- 
+
     # mid (output of 1st network, input of 2nd network)
     ee_pos = normalized_global_T[..., ee_joint_idx, :3, 3]	
     reshaped_ee_pos = np.transpose(ee_pos, (1, 2, 0, 3))
@@ -315,7 +316,7 @@ def load_data_with_args_train(file_list, args, mode = 'train', save_name=None):
 def load_data(file_list_total, base_dir = "", setting = 'vr', mode = 'train'):
     file_list = [f for f in file_list_total if f['mode'] == mode]
 
-    head_imu_input, ee_pos, output, global_p, local_rot, head_start, c_lr, info, tot_length= load_data_from_training(base_dir, file_list, setting = setting , normalization=True)
+    head_imu_input, ee_pos, output, global_p, local_rot, head_start, c_lr, info, tot_length= load_data_from_training(base_dir, file_list, setting = setting , normalization=True, mode=mode)
 
     # set necessary information to dictionary
     total, seq_len, _  = output.shape
@@ -384,8 +385,8 @@ def parse_filenames_and_load(args):
         seqlists = {}
         seqlists['fname'] = fnames
         seqlists['scene'] = scene
-        seqlists['start_end_ori'] = start_end
-        seqlists['start_end'] = (0, start_end[1]- start_end[0])
+        seqlists['start_end'] = start_end
+        # seqlists['start_end'] = (0, start_end[1]- start_end[0])
         seqlists['transform'] = None
         seqlists['body_index'] = os.listdir(os.path.join(egobody_path, f'smplx_camera_wearer_{mode}', fnames))[0]
         seqlists['file'] = [f for f in os.listdir(os.path.join(egobody_path, f'smplx_camera_wearer_{mode}', fnames, seqlists['body_index'], 'results'))]

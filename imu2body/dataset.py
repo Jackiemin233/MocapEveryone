@@ -312,7 +312,8 @@ def get_loader_training(
     data_root=None,
     batch_size=16,
     training=False,
-    drop_last=True
+    drop_last=True,
+    num_workers=8,
 ):
     """Returns data loader for custom dataset.
     Args:
@@ -324,17 +325,15 @@ def get_loader_training(
     """
 
     mode = 'train' if training == True else 'test'
+    dataset = TrainingDataset(data_root, mode)
 
     if training:
-        dataset = TrainingDataset(data_root, mode)
         data_loader = DataLoader(
-            # BUG num_workers
-            dataset=dataset, batch_size=batch_size, shuffle=True, num_workers=8, drop_last=drop_last
+            dataset=dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers, drop_last=drop_last
         )
     else:
         data_loader = DataLoader(
-            # BUG num_workers
-            dataset=dataset, batch_size=batch_size, shuffle=False, num_workers=8, drop_last=drop_last
+            dataset=dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers, drop_last=drop_last
         )
     return data_loader
 
@@ -342,6 +341,7 @@ def get_loader_validation(
     data_root=None,
     batch_size=16,
     dataset=None,
+    num_workers=8,
 ):
     """Returns data loader for custom dataset.
     Args:
@@ -357,8 +357,7 @@ def get_loader_validation(
     dataset = TrainingDataset(data_root, mode, test_only=True, test_dataset=dataset)
 
     data_loader = DataLoader(
-        # BUG num_workers
-        dataset=dataset, batch_size=batch_size, shuffle=False, num_workers=8, drop_last=False
+        dataset=dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers, drop_last=False
     )
     return data_loader
 
@@ -522,14 +521,14 @@ class GIMODataset(data.Dataset):
         # norm_input_seq = (input_seq.float() - self.mean) / (
         # 	self.std + constants.EPSILON
         # )	# Seq_normalization
-        input_['input_seq'] = input_seq.float()
-        input_['mid_seq'] = mid_seq.float()
-        input_['tgt_seq'] = tgt_seq.float()
-        input_['global_p'] = global_p.float()
-        input_['root'] = global_p[..., 0, :].float()
-        input_['contact_label'] = contact_label.float()
-        input_['local_rot'] = local_rot.float()
-        input_['head_start'] = head_start.float()
+        input_['input_seq'] = input_seq
+        input_['mid_seq'] = mid_seq
+        input_['tgt_seq'] = tgt_seq
+        input_['global_p'] = global_p
+        input_['root'] = global_p[..., 0, :]
+        input_['contact_label'] = contact_label
+        input_['local_rot'] = local_rot
+        input_['head_start'] = head_start
         #=============================IMU Parameters=============================
         # Scene Points
         input_['scene_points'] =  torch.from_numpy(scene_points).float()
@@ -628,7 +627,7 @@ def fast_load_obj_vertices(path):
     return np.array(vertices)
 
 class TrainingDataset(data.Dataset):
-    def __init__(self, dataroot, mode='train', imu_path='./preprocess_train_vr_new',
+    def __init__(self, dataroot, mode='train', imu_path='./preprocess_train_vr_0810',
                 test_only=False, test_dataset='gimo'):    # BUG preprocess_train_vr_old
         self.dataroot = dataroot
         self.gimo_dataroot = os.path.join(self.dataroot, 'GIMO') # for GIMO dataset
@@ -823,7 +822,7 @@ class TrainingDataset(data.Dataset):
         input_['dataset_name'] = info['dataset']
 
         if self.test_only:
-            input_['total_length'] = self.imu_data['total_length'][index]
+            input_['total_length'] = self.imu_data['total_length']
             input_['info'] = info
             input_['head_start'] = self.imu_data['head_start'][index]
   
@@ -1081,7 +1080,20 @@ class TrainingDataset(data.Dataset):
                 scene_key = f"{scene}_{seq}"
                 scene_points = self.scene_list[scene_key].astype(np.float32)
 
-                cropped = self.extract_points_in_bbox(scene_points, root_pose_invert, radius=self.radius)
+                # scene_ply = trimesh.load(os.path.join(self.egobody_dataroot, 'scene_mesh', scene, f'{scene}.obj'))
+                cam2world_dir = os.path.join(self.egobody_dataroot, 'calibrations', seq, 'cal_trans/kinect12_to_world')  
+                with open(os.path.join(cam2world_dir, scene + '.json'), 'r') as f:
+                    trans = np.array(json.load(f)['trans'])
+                trans = np.linalg.inv(trans)
+                
+                scene_points_w = trimesh.transform_points(scene_points, trans).astype(np.float32)
+                
+                # scene_ply.apply_transform(trans)
+                # scene_points = scene_ply.vertices
+                # self.scene_list['{}_{}'.format(scene, seq)] = scene_points
+                
+
+                cropped = self.extract_points_in_bbox(scene_points_w, root_pose_invert, radius=self.radius)
 
                 cropped = (head_start_invert @ xyz_to_transform_matrices(cropped))[0, :, :3, 3]
                 out[i] = cropped.astype(np.float32)

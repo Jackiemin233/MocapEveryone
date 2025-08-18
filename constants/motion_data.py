@@ -178,7 +178,7 @@ SMPLX_FINGER_JOINTS = [
 NUM_JOINTS = len(JOINT_NAMES)
 
 
-UP_AXIS_EGOBODY = "z"  # Egobody uses y as up axis
+UP_AXIS_EGOBODY = "y"  # Egobody uses y as up axis
 UP_AXIS_GIMO = "y"  # Gimo uses z as up axis
 
 UP_AXIS = "y"
