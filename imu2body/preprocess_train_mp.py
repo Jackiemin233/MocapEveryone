@@ -386,7 +386,7 @@ def parse_filenames_and_load(args):
         file_lists.append(seqlists)
         file_list_egobody.append(seqlists)
   
-    # load_data_with_args_train(file_list = file_lists, args=args, mode = 'train')
+    load_data_with_args_train(file_list = file_lists, args=args, mode = 'train')
  
     load_data_with_args_train(file_list = file_lists, args=args, mode = 'test')
 
