@@ -142,16 +142,45 @@ class TransformerEncoderModel(nn.Module):
 
         # return output.transpose(0, 1) # [batch, seq, output_dim]
 
-class CrossAttention(nn.Module):
-    def __init__(self, hidden_dim, num_heads):
-        super().__init__()
-        self.attn = nn.MultiheadAttention(embed_dim=hidden_dim, num_heads=num_heads)
+# class CrossAttention(nn.Module):
+#     def __init__(self, hidden_dim, num_heads):
+#         super().__init__()
+#         self.attn = nn.MultiheadAttention(embed_dim=hidden_dim, num_heads=num_heads)
 
-    def forward(self, query, context):
-        # query: [B, T, hidden_dim]
-        # context: [B, T', hidden_dim]
-        attn_output, _ = self.attn(query=query, key=context, value=context)
-        return attn_output
+#     def forward(self, query, context):
+#         # query: [B, T, hidden_dim]
+#         # context: [B, T', hidden_dim]
+#         attn_output, _ = self.attn(query=query, key=context, value=context)
+#         return attn_output
+
+class CrossAttention(nn.Module):
+    def __init__(self, hidden_dim, num_heads, attn_drop=0.1, proj_drop=0.0):
+        super().__init__()
+        self.norm_q = nn.LayerNorm(hidden_dim)
+        self.norm_kv = nn.LayerNorm(hidden_dim)
+
+        self.attn = nn.MultiheadAttention(
+            embed_dim=hidden_dim, num_heads=num_heads,
+            dropout=attn_drop, batch_first=False
+        )
+        self.proj = nn.Linear(hidden_dim, hidden_dim)
+        self.proj_drop = nn.Dropout(proj_drop)
+
+        # 残差门控，初始为 0，确保一开始几乎等价于不加 cross-attn
+        self.gate = nn.Parameter(torch.zeros(1))
+
+        # 关键：把输出线性层置零初始化，进一步保证初期稳定
+        nn.init.zeros_(self.proj.weight)
+        nn.init.zeros_(self.proj.bias)
+
+    def forward(self, x, context):
+        # x: [B,T,E], context: [B,Tc,E] 或 [B,1,E]
+        q = self.norm_q(x)
+        kv = self.norm_kv(context)
+        out, _ = self.attn(query=q, key=kv, value=kv, need_weights=False)
+        out = self.proj_drop(self.proj(out))
+        y = x + self.gate * out
+        return y
 
 
 class TransformerSceneEncoderModel(nn.Module):

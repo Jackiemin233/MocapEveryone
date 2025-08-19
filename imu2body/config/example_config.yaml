@@ -41,4 +41,4 @@ test:
     num_epoch: 1
 
 eval:
-    num_epoch_eval: 10 # every 5 epoch eval
+    num_epoch_eval: 5 # every 5 epoch eval

@@ -763,7 +763,10 @@ class TrainingDataset(data.Dataset):
         mid_seq = torch.from_numpy(self.imu_data['mid_seq'][index]).float()
         tgt_seq = torch.from_numpy(self.imu_data['tgt_seq'][index]).float()
         global_p = torch.from_numpy(self.imu_data['global_p'][index]).float()
-        contact_label = torch.from_numpy(self.imu_data['contact_label'][index]).float()
+        if len(self.imu_data['contact_label']) > 0:
+            contact_label = torch.from_numpy(self.imu_data['contact_label'][index]).float()
+        else:
+            contact_label = 1.
         local_rot = torch.from_numpy(self.imu_data['local_rot'][index]).float()
         head_start = self.imu_data['head_start'][index]
         head_start_invert = self.imu_data['head_start_invert'][index]
@@ -811,7 +814,7 @@ class TrainingDataset(data.Dataset):
         input_['tgt_seq'] = tgt_seq.float()
         input_['global_p'] = global_p.float()
         input_['root'] = global_p[..., 0, :].float()
-        input_['contact_label'] = contact_label.float()
+        input_['contact_label'] = contact_label
         input_['local_rot'] = local_rot.float()
         input_['head_start'] = torch.from_numpy(head_start).float()
         # Scene Points

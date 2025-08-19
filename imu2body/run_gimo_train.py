@@ -483,7 +483,7 @@ class IMU2BodyNetwork(object):
         self.est_loss = torch.mean(mid_est_diff)
 
         # contact classifier loss
-        self.contact_loss = self.contact_criterion(contact_output, gt_contact_label)
+        # self.contact_loss = self.contact_criterion(contact_output, gt_contact_label)
 
         self.loss_total = self.config['train']['loss_pos_weight'] * self.pos_mean_loss + \
                         self.config['train']['loss_foot_weight'] * self.foot_pos_loss + \
@@ -491,8 +491,8 @@ class IMU2BodyNetwork(object):
                         self.config['train']['loss_mid_weight'] * self.mid_mean_loss + \
                         self.config['train']['loss_quat_weight'] * self.rotation_mse_loss + \
                         self.config['train']['loss_root_weight'] * self.root_mean_loss + \
-                        self.config['train']['loss_est_weight'] * self.est_loss + \
-                        self.config['train']['loss_contact_weight'] * self.contact_loss
+                        self.config['train']['loss_est_weight'] * self.est_loss 
+                        # + self.config['train']['loss_contact_weight'] * self.contact_loss
 
         if self.foot_vel_loss is not None:
             self.loss_total += self.config['train']['loss_vel_weight'] * self.foot_vel_loss
@@ -602,7 +602,7 @@ class IMU2BodyNetwork(object):
         self.writer.add_scalar('loss_quat', self.rotation_mse_loss.item(), global_step = epoch * steps_per_epoch + idx)
         self.writer.add_scalar('loss_root', self.root_mean_loss.item(), global_step = epoch * steps_per_epoch + idx)
         self.writer.add_scalar('loss_est', self.est_loss.item(), global_step = epoch * steps_per_epoch + idx)
-        self.writer.add_scalar('loss_contact', self.contact_loss.item(), global_step = epoch * steps_per_epoch + idx)
+        # self.writer.add_scalar('loss_contact', self.contact_loss.item(), global_step = epoch * steps_per_epoch + idx)
 
         self.writer.add_scalar('loss_total', self.loss_total.item(), global_step = epoch * steps_per_epoch + idx)
         if self.foot_vel_loss is not None:
