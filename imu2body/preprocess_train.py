@@ -46,7 +46,7 @@ smplh_bm_path = "../data/smpl_models/smplh/male/model.npz"
 CUR_BM_TYPE = "smplx"
 
 
-def load_data_from_training(base_dir, file_list, setting = 'vr', debug=False, normalization = False):
+def load_data_from_training(base_dir, file_list, setting = 'vr', debug=False, normalization = False, mode='train'):
     motion_list = []
     data_set_info = []
     for seq in tqdm(file_list):
@@ -54,7 +54,8 @@ def load_data_from_training(base_dir, file_list, setting = 'vr', debug=False, no
             filepath_list = [os.path.join(base_dir, 'GIMO', seq['fname'], 'smplx_local', file) for file in seq['file']]
             transform_info = json.load(open(os.path.join(base_dir, 'GIMO', seq['fname'], seq['transform']), 'r')) # pose to scene transformation
             transform_norm = np.loadtxt(os.path.join(base_dir, 'GIMO', seq['fname'], '../', 'scene_obj', 'transform_norm.txt')).reshape((4, 4))
-            pkl_files = [f for f in filepath_list if f.endswith('.pkl')]
+            # pkl_files = [f for f in filepath_list if f.endswith('.pkl')]
+            pkl_files = [f for f in filepath_list if f.endswith('.pkl')][seq['start_end'][0] : seq['start_end'][1]]
         elif seq['dataset'] == 'egobody':
             pkl_files = [os.path.join(base_dir, 'Egobody_dataset', f"smplx_camera_wearer_{seq['mode']}", seq['fname'], seq['body_index'], 'results', file, '000.pkl') for file in seq['file']]
             transform_info = None
@@ -115,11 +116,11 @@ def load_data_from_training(base_dir, file_list, setting = 'vr', debug=False, no
 
     # constants
     window = motion_constants.preprocess_window
-    offset = motion_constants.preprocess_offset
+    offset = motion_constants.preprocess_offset if mode=='train' else motion_constants.preprocess_window
  
     is_custom_run = False
     for motion, info in tqdm(zip(motion_list, data_set_info)):
-        height_indice = 1 if info['dataset'] == 'gimo' else 2 # y for GIMO and z for egobody
+        height_indice = 1 # y for GIMO and y for egobody
         if motion is None or motion.num_frames() < window:
             continue
         motion_local_T = motion.to_matrix()
@@ -136,8 +137,11 @@ def load_data_from_training(base_dir, file_list, setting = 'vr', debug=False, no
         start_frame, end_frame = info['start_end'][0], info['start_end'][1] #[242, 528]
         i = start_frame
         while True:
-            if i+window > end_frame:
+            print(i)
+            if i >= end_frame:
                 break
+            if i + window >= end_frame:
+                i = end_frame - window
             else:
                 local_T_window = motion_local_T[i: i+window]
                 global_T_window = motion_global_T[i: i+window]
@@ -147,8 +151,10 @@ def load_data_from_training(base_dir, file_list, setting = 'vr', debug=False, no
             # apply height offset: TODO check sign
             local_T_window_height_adjust = deepcopy(local_T_window)
             global_T_window_height_adjust = deepcopy(global_T_window)
+            # local_T_window_height_adjust = local_T_window.copy()
+            # global_T_window_height_adjust = global_T_window.copy()
 
-            if not is_custom_run:
+            if not is_custom_run and mode == 'train':         # NOTE
                 _, cur_height_offset = get_height_offset_current_frame(contact_dict=contact, cur_frame=i)
                 if abs(cur_height_offset) > 0:
                     local_T_window_height_adjust[:, 0, height_indice, 3] -= cur_height_offset
@@ -166,9 +172,8 @@ def load_data_from_training(base_dir, file_list, setting = 'vr', debug=False, no
                 'dataset': info['dataset'],
                 'transform': info['transform']
             })
-
             i += offset
-            if not is_custom_run:
+            if not is_custom_run and mode == 'train':
                 # update floor for next window
                 result_dict = update_height_offset(global_T=global_T_window, prev_offset=height_offset, frame_start=i, return_contact_labels=True)
 
@@ -257,25 +262,30 @@ def load_data_from_training(base_dir, file_list, setting = 'vr', debug=False, no
     
     # return global pos for FK loss calc
     global_p = normalized_global_T[...,:3,3]
+    tot_length = motion_local_T.shape[0]
 
-    return head_imu_input, ee_pos_v, output, global_p, local_T[...,:3,:3], head_start_T, c_lr, info_list
+    return head_imu_input, ee_pos_v, output, global_p, local_T[...,:3,:3], head_start_T, c_lr, info_list, tot_length
 
-def load_data_with_args_train(file_list, args, mode = 'train'):
+def load_data_with_args_train(file_list, args, mode = 'train', save_name=None):
     data, total_len = load_data(file_list, base_dir=args.base_dir, setting=args.setting, mode = mode)            
-    with open(os.path.join(args.preprocess_path, f"{mode}_vr.pkl"), "wb") as f_write:
+    if save_name is not None:
+        write_path = os.path.join(args.preprocess_path, f'{save_name}_vr.pkl')
+    else:
+        write_path = os.path.join(args.preprocess_path, f'{mode}_vr.pkl')
+    with open(write_path, "wb") as f_write:
         pickle.dump(data, f_write, protocol=pickle.HIGHEST_PROTOCOL)
-    logging.info(f"Saved {mode} data with {total_len} sequences in {os.path.join(args.preprocess_path, f'{mode}.pkl')}")
+    logging.info(f"Saved {mode} data with {total_len} sequences in {write_path}")
 
 def load_data(file_list_total, base_dir = "", setting = 'vr', mode = 'train'):
     file_list = [f for f in file_list_total if f['mode'] == mode]
 
-    head_imu_input, ee_pos, output, global_p, local_rot, head_start, c_lr, info = load_data_from_training(base_dir, file_list, setting = setting , normalization=True)
+    head_imu_input, ee_pos, output, global_p, local_rot, head_start, c_lr, info, tot_length= load_data_from_training(base_dir, file_list, setting = setting , normalization=True, mode=mode)
 
     # set necessary information to dictionary
     total, seq_len, _  = output.shape
     input_ = {}
     input_['input_seq'] = head_imu_input 
-    input_['mid_seq'] = ee_pos 
+    input_['mid_seq'] = ee_pos
     input_['tgt_seq'] = output 
     input_['global_p'] = global_p
     input_['root'] = global_p[..., 0, :] 
@@ -283,6 +293,7 @@ def load_data(file_list_total, base_dir = "", setting = 'vr', mode = 'train'):
     input_['head_start'] = head_start 
     input_['contact_label'] = c_lr
     input_['info'] = info
+    input_['total_length'] = tot_length
 
     return input_, total
 
@@ -297,6 +308,7 @@ def parse_filenames_and_load(args):
     egobody_data_info = pd.read_csv(os.path.join(egobody_path, 'data_info_release.csv'))
     egobody_data_split_info = pd.read_csv(os.path.join(egobody_path, 'data_split.csv'))
     
+    # ===================== GIMO =====================
     # Aligned - GIMO
     fnames_list = (gimo_data_info['scene'].astype(str) + '/' + gimo_data_info['sequence_path'].astype(str)).tolist()
     start_end_list = list(zip(gimo_data_info['start_frame'].astype(int), gimo_data_info['end_frame'].astype(int)))
@@ -305,34 +317,38 @@ def parse_filenames_and_load(args):
     training = gimo_data_info['training']
     
     file_lists = []
-    for fnames, start_end, transform, scene, training in tqdm(zip(fnames_list, start_end_list, transform_info, scene_list, training)): # GIMO Dataset
+    for fnames, start_end, transform, scene, training in tqdm(zip(fnames_list, start_end_list, transform_info, scene_list, training), desc='load GIMO seqlists'): # GIMO Dataset
         seqlists = {}
         seqlists['fname'] = fnames
-        seqlists['start_end'] = start_end
+        seqlists['start_end_origin'] = start_end
+        seqlists['start_end'] = (0, start_end[1]-start_end[0])
         seqlists['scene'] = scene
         seqlists['transform'] = transform
         seqlists['file'] = [f for f in os.listdir(os.path.join(gimo_path, fnames, 'smplx_local')) if f.endswith('.pkl')]
         seqlists['file'].sort(key=lambda x: int(''.join(filter(str.isdigit, x))))
-        seqlists['mode'] = 'train' if training == 1 else 'val'
+        seqlists['mode'] = 'train' if training == 1 else 'test'     # NOTE
         seqlists['dataset'] = 'gimo'
         file_lists.append(seqlists) #NOTE: comment this line to debug Egobody
-   
+        # file_list_gimo.append(seqlists)
+    
+
+    # ===================== EgoBody =====================
     fnames_list = (egobody_data_info['recording_name'].astype(str)).tolist()
     start_end_list = list(zip(egobody_data_info['start_frame'].astype(int), egobody_data_info['end_frame'].astype(int)))
     scene_list = (egobody_data_info['scene_name'].astype(str)).tolist()
  
-    for fnames, start_end, scene in tqdm(zip(fnames_list, start_end_list, scene_list)):
+    for fnames, start_end, scene in tqdm(zip(fnames_list, start_end_list, scene_list), desc='load egobody seqlists'):
         for col in egobody_data_split_info.columns:
             if bool((egobody_data_split_info[col] == fnames).any()):
-                mode = col 
+                mode = col
                 break
-        if mode == 'test' or mode == '': # we dont process test mode in this script
+        if mode == 'val' or mode == '': # NOTE we dont process VAL mode in this script
             continue
         seqlists = {}
         seqlists['fname'] = fnames
         seqlists['scene'] = scene
-        seqlists['start_end_ori'] = start_end
-        seqlists['start_end'] = (0, start_end[1]- start_end[0])
+        seqlists['start_end_origin'] = start_end
+        seqlists['start_end'] = (0, start_end[1]-start_end[0]+1)
         seqlists['transform'] = None
         seqlists['body_index'] = os.listdir(os.path.join(egobody_path, f'smplx_camera_wearer_{mode}', fnames))[0]
         seqlists['file'] = [f for f in os.listdir(os.path.join(egobody_path, f'smplx_camera_wearer_{mode}', fnames, seqlists['body_index'], 'results'))]
@@ -340,10 +356,11 @@ def parse_filenames_and_load(args):
         seqlists['mode'] = mode
         seqlists['dataset'] = 'egobody'
         file_lists.append(seqlists)
+        # file_list_egobody.append(seqlists)
   
     load_data_with_args_train(file_list = file_lists, args=args, mode = 'train')
  
-    load_data_with_args_train(file_list = file_lists, args=args, mode = 'val')
+    load_data_with_args_train(file_list = file_lists, args=args, mode = 'test')
 
 if __name__ == "__main__":
     import torch.multiprocessing as mp

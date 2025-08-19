@@ -56,7 +56,8 @@ def process_sequence(seq, base_dir, cur_bm_type='smplx'):
         filepath_list = [os.path.join(base_dir, 'GIMO', seq['fname'], 'smplx_local', file) for file in seq['file']]
         transform_info = json.load(open(os.path.join(base_dir, 'GIMO', seq['fname'], seq['transform']), 'r')) # pose to scene transformation
         transform_norm = np.loadtxt(os.path.join(base_dir, 'GIMO', seq['fname'], '../', 'scene_obj', 'transform_norm.txt')).reshape((4, 4))
-        pkl_files = [f for f in filepath_list if f.endswith('.pkl')]
+        # pkl_files = [f for f in filepath_list if f.endswith('.pkl')]
+        pkl_files = [f for f in filepath_list if f.endswith('.pkl')][seq['start_end'][0] : seq['start_end'][1]]
     elif seq['dataset'] == 'egobody':
         pkl_files = [os.path.join(base_dir, 'Egobody_dataset', f"smplx_camera_wearer_{seq['mode']}", seq['fname'], seq['body_index'], 'results', file, '000.pkl') for file in seq['file']]
         transform_info = None
@@ -101,22 +102,10 @@ def load_data_from_training(base_dir, file_list, setting = 'vr', debug=False, no
     logging.info(f"Start loading {len(file_list)} sequences with multiprocessing...")
 
     try:
-        with Pool(processes=cpu_count()) as pool:
+        with Pool(processes=16) as pool:
             results = list(tqdm(pool.imap(partial(process_sequence, base_dir=base_dir), file_list), total=len(file_list)))
-    except KeyboardInterrupt:
-        print("User cancelled. Terminating pool...")
-        pool.terminate()
-        pool.join()
-        raise
     except Exception as e:
         print(f"Error: {e}. Terminating pool...")
-        pool.terminate()
-        pool.join()
-        raise
-    finally:
-        if pool:
-            pool.close()
-            pool.join()
 
 
     motion_list = []
@@ -174,27 +163,25 @@ def load_data_from_training(base_dir, file_list, setting = 'vr', debug=False, no
 
         # split into sliding windows
         start_frame, end_frame = info['start_end'][0], info['start_end'][1] #[242, 528]
+        # print(start_frame, end_frame)
         i = start_frame
-        while True:
-            if i > end_frame:
-                break
-            if i + window >= end_frame:
-                i = end_frame - window
-            else:
-                local_T_window = motion_local_T[i: i+window]
-                global_T_window = motion_global_T[i: i+window]
-                imu_rot_window = motion_imu_rot[i: i+window]
-                imu_acc_window = motion_imu_acc[i: i+window]
+        while i + window <= end_frame:
+            local_T_window = motion_local_T[i: i+window]
+            global_T_window = motion_global_T[i: i+window]
+            imu_rot_window = motion_imu_rot[i: i+window]
+            imu_acc_window = motion_imu_acc[i: i+window]
 
             # apply height offset: TODO check sign
             local_T_window_height_adjust = deepcopy(local_T_window)
             global_T_window_height_adjust = deepcopy(global_T_window)
+            # local_T_window_height_adjust = local_T_window.copy()
+            # global_T_window_height_adjust = global_T_window.copy()
 
-            # if not is_custom_run:         # NOTE
-            #     _, cur_height_offset = get_height_offset_current_frame(contact_dict=contact, cur_frame=i)
-            #     if abs(cur_height_offset) > 0:
-            #         local_T_window_height_adjust[:, 0, height_indice, 3] -= cur_height_offset
-            #         global_T_window_height_adjust[..., height_indice, 3] -= cur_height_offset
+            if not is_custom_run and mode == 'train':         # NOTE
+                _, cur_height_offset = get_height_offset_current_frame(contact_dict=contact, cur_frame=i)
+                if abs(cur_height_offset) > 0:
+                    local_T_window_height_adjust[:, 0, height_indice, 3] -= cur_height_offset
+                    global_T_window_height_adjust[..., height_indice, 3] -= cur_height_offset
 
             # record
             local_T.append(local_T_window_height_adjust)
@@ -216,6 +203,7 @@ def load_data_from_training(base_dir, file_list, setting = 'vr', debug=False, no
                 updated_height_offset = result_dict['height']
                 updated_contact_frame = result_dict['frame']
                 contact_labels  = result_dict['contact_label']
+                print(contact_labels.shape)
 
                 if updated_contact_frame > contact_frame:
                     contact_frame = updated_contact_frame
@@ -229,8 +217,9 @@ def load_data_from_training(base_dir, file_list, setting = 'vr', debug=False, no
     imu_rot = np.asarray(imu_rot).astype(dtype=np.float32) 
     imu_acc = np.asarray(imu_acc).astype(dtype=np.float32)
 
-    c_lr = np.asarray(c_lr).astype(dtype=np.float32)
-    c_lr = c_lr.transpose(0,2,1)
+    if mode == 'train':
+        c_lr = np.asarray(c_lr).astype(dtype=np.float32)
+        c_lr = c_lr.transpose(0,2,1)
 
     head_idx = skel.get_index_joint("Head")
     if info['dataset'] == 'gimo':
@@ -359,7 +348,8 @@ def parse_filenames_and_load(args):
     for fnames, start_end, transform, scene, training in tqdm(zip(fnames_list, start_end_list, transform_info, scene_list, training), desc='load GIMO seqlists'): # GIMO Dataset
         seqlists = {}
         seqlists['fname'] = fnames
-        seqlists['start_end'] = start_end
+        seqlists['start_end_origin'] = start_end
+        seqlists['start_end'] = (0, start_end[1]-start_end[0])
         seqlists['scene'] = scene
         seqlists['transform'] = transform
         seqlists['file'] = [f for f in os.listdir(os.path.join(gimo_path, fnames, 'smplx_local')) if f.endswith('.pkl')]
@@ -385,8 +375,8 @@ def parse_filenames_and_load(args):
         seqlists = {}
         seqlists['fname'] = fnames
         seqlists['scene'] = scene
-        seqlists['start_end'] = start_end
-        # seqlists['start_end'] = (0, start_end[1]- start_end[0])
+        seqlists['start_end_origin'] = start_end
+        seqlists['start_end'] = (0, start_end[1]-start_end[0]+1)
         seqlists['transform'] = None
         seqlists['body_index'] = os.listdir(os.path.join(egobody_path, f'smplx_camera_wearer_{mode}', fnames))[0]
         seqlists['file'] = [f for f in os.listdir(os.path.join(egobody_path, f'smplx_camera_wearer_{mode}', fnames, seqlists['body_index'], 'results'))]
@@ -396,16 +386,16 @@ def parse_filenames_and_load(args):
         file_lists.append(seqlists)
         file_list_egobody.append(seqlists)
   
-    load_data_with_args_train(file_list = file_lists, args=args, mode = 'train')
+    # load_data_with_args_train(file_list = file_lists, args=args, mode = 'train')
  
     load_data_with_args_train(file_list = file_lists, args=args, mode = 'test')
 
-    load_data_with_args_train(file_list = file_list_gimo, args=args, mode = 'test', save_name='test_gimo')
-    load_data_with_args_train(file_list = file_list_egobody, args=args, mode = 'test', save_name='test_egobody')
+    # load_data_with_args_train(file_list = file_list_gimo, args=args, mode = 'test', save_name='test_gimo')
+    # load_data_with_args_train(file_list = file_list_egobody, args=args, mode = 'test', save_name='test_egobody')
 
 if __name__ == "__main__":
     import torch.multiprocessing as mp
-    mp.set_start_method('spawn')
+    mp.set_start_method('spawn', force=True)
     # add argparse
     parser = argparse.ArgumentParser()
     parser.add_argument(

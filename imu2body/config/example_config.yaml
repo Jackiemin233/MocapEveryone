@@ -17,7 +17,7 @@ model:
     hidden_dim_scene: 1280
     
 train:
-    batch_size: 128 # 256
+    batch_size: 256 # 256
     loss_pos_weight: 1.5
     loss_quat_weight: 1.25
     loss_root_weight: 1.0
