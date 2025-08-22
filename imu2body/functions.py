@@ -822,7 +822,7 @@ def save_two_pointclouds_with_colors(pc1: torch.Tensor, pc2: torch.Tensor, filen
     print(f"Saved point cloud to {filename}")
 
     # 可视化（可选）
-    o3d.visualization.draw_geometries([pcd])
+    # o3d.visualization.draw_geometries([pcd])
 
 def xyz_to_transform_matrices(points):
     """
@@ -856,3 +856,28 @@ def transform_matrices_to_xyz(transforms):
     """
     # 直接从每个变换矩阵的平移部分提取xyz坐标
     return transforms[:, :3, 3]
+
+def rbf_time_kernel_T(T, lengthscale, device, dtype):
+    t = torch.arange(T, device=device, dtype=dtype)
+    dt2 = (t[:, None] - t[None, :]) ** 2   # [T,T]
+    K = torch.exp(-0.5 * dt2 / (lengthscale ** 2))
+    return K
+
+class GPTimeNoiseTBD:
+    def __init__(self, T, lengthscale=5.0, jitter=1e-6, device='cuda', dtype=torch.float32):
+        K = rbf_time_kernel_T(T, lengthscale, device, dtype)
+        K = K + jitter * torch.eye(T, device=device, dtype=dtype)
+        self.L = torch.linalg.cholesky(K)  # [T,T]
+        self.T = T
+        self.device = device
+        self.dtype = dtype
+
+    @torch.no_grad()
+    def sample_eps(self, B, D):
+        # 先采白噪： [T,B,D]
+        eps_white = torch.randn((self.T, B, D), device=self.device, dtype=self.dtype)
+        
+        # 沿时间维做相关化： [T,T] @ [T,B,D] -> [T,B,D]
+        eps_corr  = torch.einsum('ij,jbd->ibd', self.L, eps_white)  # 左乘 L
+        
+        return eps_corr

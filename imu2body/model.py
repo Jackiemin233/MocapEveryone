@@ -2,7 +2,8 @@ import sys, os
 dir_path = os.path.dirname(os.path.realpath(__file__))
 parent_dir_path = os.path.abspath(os.path.join(dir_path, os.pardir))
 sys.path.append(parent_dir_path)
-from imu2body.model_base import TransformerEncoderModel, TransformerSceneEncoderModel
+from imu2body.model_base import TransformerEncoderModel, TransformerSceneEncoderModel, TransformerSceneFiLMModel, \
+                                TransformerEncoderModel_Uncertain
 # from imu2body.model_base import PointNet2SemSegSSGShape, PointNet, FPModule
 # from imu2body.model_base import WaveletEmbedding
 from torch.nn import TransformerEncoder, TransformerEncoderLayer
@@ -97,13 +98,15 @@ class IMU2BodyModel(nn.Module):
         input_dim = data_config['input_dim']
         mid_dim = data_config['mid_dim']
         output_dim = data_config['output_dim']
-        print(input_dim, mid_dim, output_dim)
+        # print(input_dim, mid_dim, output_dim)
 
         self.use_sep_encoder = model_config['sep_encoder']
         self.temporal = model_config['temporal_model']
         self.hand_estimator = model_config['hand_estimator']
         self.visual_input = model_config['visual_input']
-        self.environment_enc = model_config['environment_enc']
+        self.environment_enc = model_config.get('environment_enc', False)
+        self.use_uncertainty = model_config.get('uncertainty_model', False)
+        self.use_film = model_config.get('use_film', False)
 
         if self.environment_enc:
             self.pcd_encoder = PointNet2Encoder()
@@ -126,13 +129,32 @@ class IMU2BodyModel(nn.Module):
 
         # imu + head + ee pose -> contact, output
         if self.environment_enc:
-            self.hand2body = TransformerSceneEncoderModel(
-                input_dim=hand2body_input_dim,
-                output_dim=output_dim,
-                hidden_dim=model_config['hidden_dim2'],
-                num_heads=model_config['num_head2'],
-                estimate_contact=True,
-            )
+            if self.use_film:
+                self.hand2body = TransformerSceneFiLMModel(
+                    input_dim=hand2body_input_dim,
+                    output_dim=output_dim,
+                    hidden_dim=model_config['hidden_dim2'],
+                    num_heads=model_config['num_head2'],
+                    estimate_contact=True,
+                    context_dim=1280
+                )
+            elif self.use_uncertainty:
+                print("USING UNCERTAINTY MODEL")
+                self.hand2body = TransformerEncoderModel_Uncertain(
+                    input_dim=hand2body_input_dim,
+                    output_dim=output_dim,
+                    hidden_dim=model_config['hidden_dim2'],
+                    num_heads=model_config['num_head2'],
+                    estimate_contact=True,
+                )
+            else:
+                self.hand2body = TransformerSceneEncoderModel(
+                    input_dim=hand2body_input_dim,
+                    output_dim=output_dim,
+                    hidden_dim=model_config['hidden_dim2'],
+                    num_heads=model_config['num_head2'],
+                    estimate_contact=True,
+                )
         else:
             self.hand2body = TransformerEncoderModel(
                 input_dim=hand2body_input_dim,
@@ -141,7 +163,7 @@ class IMU2BodyModel(nn.Module):
                 num_heads=model_config['num_head2'],
                 estimate_contact=True,
             )
-
+        
     def init_weights(self):
         self.imu2hand.init_weights()
         self.hand2body.init_weights()
@@ -155,8 +177,11 @@ class IMU2BodyModel(nn.Module):
             input_pc = input_pc - input_pc.mean(dim=1, keepdim=True)
             input_pc = input_pc / (input_pc.norm(dim=2, keepdim=True).amax(dim=1, keepdim=True) + 1e-8)
             env_context = self.pcd_encoder(input_pc.permute(0, 2, 1))       # B,N,3 -> B,3,N
-
-            contact, output = self.hand2body(input_concat, context=env_context)  # 加入点云特征
+            if self.use_uncertainty:
+                contact, output, logvar, sampled_output = self.hand2body(input_concat, context=env_context, sample=True)  # 加入点云特征
+                return ee, contact, output, sampled_output, logvar          # B,T,D
+            else:
+                contact, output = self.hand2body(input_concat, context=env_context)  # 加入点云特征
         else:
             contact, output = self.hand2body(input_concat) #output: [batch. seq, 135]
         return ee, contact, output

@@ -177,11 +177,11 @@ def load_data_from_training(base_dir, file_list, setting = 'vr', debug=False, no
             # local_T_window_height_adjust = local_T_window.copy()
             # global_T_window_height_adjust = global_T_window.copy()
 
-            if not is_custom_run and mode == 'train':         # NOTE
-                _, cur_height_offset = get_height_offset_current_frame(contact_dict=contact, cur_frame=i)
-                if abs(cur_height_offset) > 0:
-                    local_T_window_height_adjust[:, 0, height_indice, 3] -= cur_height_offset
-                    global_T_window_height_adjust[..., height_indice, 3] -= cur_height_offset
+            # if not is_custom_run and mode == 'train':         # NOTE
+            #     _, cur_height_offset = get_height_offset_current_frame(contact_dict=contact, cur_frame=i)
+            #     if abs(cur_height_offset) > 0:
+            #         local_T_window_height_adjust[:, 0, height_indice, 3] -= cur_height_offset
+            #         global_T_window_height_adjust[..., height_indice, 3] -= cur_height_offset
 
             # record
             local_T.append(local_T_window_height_adjust)
@@ -203,7 +203,7 @@ def load_data_from_training(base_dir, file_list, setting = 'vr', debug=False, no
                 updated_height_offset = result_dict['height']
                 updated_contact_frame = result_dict['frame']
                 contact_labels  = result_dict['contact_label']
-                print(contact_labels.shape)
+                # print(contact_labels.shape)
 
                 if updated_contact_frame > contact_frame:
                     contact_frame = updated_contact_frame

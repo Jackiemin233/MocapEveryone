@@ -867,8 +867,6 @@ class TrainingDataset(data.Dataset):
     def load_imu(self):
         with open(self.imu_path, 'rb') as f:
             self.imu_data = pickle.load(f)
-        # if 'scene_points' not in self.imu_data:
-        #     self.imu_data['scene_points'] = []
         print('IMU information load done')
                  
     def load_data_dict(self):

@@ -35,10 +35,40 @@
             "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/imu2body/run_gimo_train.py",
+            "env":{"CUDA_VISIBLE_DEVICES":"3"},
             "args": [
                 "--test_name=mocapee_vr_debug",
                 "--mode=train",
-                "--config=example_config"
+                "--config=exp_0820_uncertainty"
+            ],
+            "cwd": "${workspaceFolder}/imu2body",
+            "justMyCode": true
+        },
+        {
+            "name": "Test",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/imu2body/run_gimo_train.py",
+            "env":{"CUDA_VISIBLE_DEVICES":"3"},
+            "args": [
+                "--test_name=mocapee_vr_0820_uncertainty_nll_loss",
+                "--mode=test",
+                "--config=exp_0820_uncertainty"
+            ],
+            "cwd": "${workspaceFolder}/imu2body",
+            "justMyCode": true
+        },
+        {
+            "name": "Test multin",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/imu2body/run_gimo_train.py",
+            "env":{"CUDA_VISIBLE_DEVICES":"3"},
+            "args": [
+                "--test_name=mocapee_vr_0820_uncertainty_nll_loss",
+                "--mode=test",
+                "--multin=10",
+                "--config=exp_0820_uncertainty",
             ],
             "cwd": "${workspaceFolder}/imu2body",
             "justMyCode": true
