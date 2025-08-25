@@ -3,10 +3,10 @@ dir_path = os.path.dirname(os.path.realpath(__file__))
 parent_dir_path = os.path.abspath(os.path.join(dir_path, os.pardir))
 sys.path.append(parent_dir_path)
 from imu2body.model_base import TransformerEncoderModel, TransformerSceneEncoderModel, TransformerSceneFiLMModel, \
-                                TransformerEncoderModel_Uncertain
+                                TransformerEncoderModel_Uncertain, TransformerSceneFiLMModel_Uncertain
 # from imu2body.model_base import PointNet2SemSegSSGShape, PointNet, FPModule
 # from imu2body.model_base import WaveletEmbedding
-from torch.nn import TransformerEncoder, TransformerEncoderLayer
+from imu2body.model_base_swt import WaveletSWTBlock, TransformerSceneFiLMModel_SWT
 from imu2body.pointnet2 import PointNet2Encoder
 
 import torch
@@ -107,6 +107,7 @@ class IMU2BodyModel(nn.Module):
         self.environment_enc = model_config.get('environment_enc', False)
         self.use_uncertainty = model_config.get('uncertainty_model', False)
         self.use_film = model_config.get('use_film', False)
+        self.use_swt = model_config.get('use_swt', False)
 
         if self.environment_enc:
             self.pcd_encoder = PointNet2Encoder()
@@ -129,7 +130,7 @@ class IMU2BodyModel(nn.Module):
 
         # imu + head + ee pose -> contact, output
         if self.environment_enc:
-            if self.use_film:
+            if self.use_film and not self.use_uncertainty and not self.use_swt:
                 self.hand2body = TransformerSceneFiLMModel(
                     input_dim=hand2body_input_dim,
                     output_dim=output_dim,
@@ -138,7 +139,17 @@ class IMU2BodyModel(nn.Module):
                     estimate_contact=True,
                     context_dim=1280
                 )
-            elif self.use_uncertainty:
+            elif self.use_film and self.use_uncertainty and not self.use_swt:
+                print("USING UNCERTAINTY FILM MODEL")
+                self.hand2body = TransformerSceneFiLMModel_Uncertain(
+                    input_dim=hand2body_input_dim,
+                    output_dim=output_dim,
+                    hidden_dim=model_config['hidden_dim2'],
+                    num_heads=model_config['num_head2'],
+                    estimate_contact=True,
+                    context_dim=1280
+                )
+            elif self.use_uncertainty and not self.use_swt:
                 print("USING UNCERTAINTY MODEL")
                 self.hand2body = TransformerEncoderModel_Uncertain(
                     input_dim=hand2body_input_dim,
@@ -146,6 +157,17 @@ class IMU2BodyModel(nn.Module):
                     hidden_dim=model_config['hidden_dim2'],
                     num_heads=model_config['num_head2'],
                     estimate_contact=True,
+                )
+            elif self.use_swt:
+                print("USING WAVELET TRANSFORM")
+                self.hand2body = TransformerSceneFiLMModel_SWT(
+                    input_dim=hand2body_input_dim,
+                    output_dim=output_dim,
+                    hidden_dim=model_config['hidden_dim2'],
+                    num_heads=model_config['num_head2'],
+                    estimate_contact=True,
+                    context_dim=1280,
+                    wavelet_levels=3
                 )
             else:
                 self.hand2body = TransformerSceneEncoderModel(
@@ -178,8 +200,8 @@ class IMU2BodyModel(nn.Module):
             input_pc = input_pc / (input_pc.norm(dim=2, keepdim=True).amax(dim=1, keepdim=True) + 1e-8)
             env_context = self.pcd_encoder(input_pc.permute(0, 2, 1))       # B,N,3 -> B,3,N
             if self.use_uncertainty:
-                contact, output, logvar, sampled_output = self.hand2body(input_concat, context=env_context, sample=True)  # 加入点云特征
-                return ee, contact, output, sampled_output, logvar          # B,T,D
+                contact, mean, logvar, sampled_output = self.hand2body(input_concat, context=env_context, sample=True)  # 加入点云特征
+                return ee, contact, mean, sampled_output, logvar          # B,T,D
             else:
                 contact, output = self.hand2body(input_concat, context=env_context)  # 加入点云特征
         else:

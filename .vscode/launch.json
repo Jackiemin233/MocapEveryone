@@ -39,7 +39,35 @@
             "args": [
                 "--test_name=mocapee_vr_debug",
                 "--mode=train",
-                "--config=exp_0820_uncertainty"
+                "--config=exp_0824_swt"
+            ],
+            "cwd": "${workspaceFolder}/imu2body",
+            "justMyCode": true
+        },
+        {
+            "name": "Train Uncertainty",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/imu2body/run_gimo_train.py",
+            "env":{"CUDA_VISIBLE_DEVICES":"3"},
+            "args": [
+                "--test_name=exp_0824_film_uncertainty_1",
+                "--mode=train",
+                "--config=exp_0824_film_uncertainty_1"
+            ],
+            "cwd": "${workspaceFolder}/imu2body",
+            "justMyCode": true
+        },
+        {
+            "name": "Train fre_T_decom",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/imu2body/run_gimo_train.py",
+            "env":{"CUDA_VISIBLE_DEVICES":"3"},
+            "args": [
+                "--test_name=mocapee_vr_0824_freq_time_decom_loss_debug",
+                "--mode=train",
+                "--config=exp_0824_freq_time_decom_loss"
             ],
             "cwd": "${workspaceFolder}/imu2body",
             "justMyCode": true
@@ -65,10 +93,10 @@
             "program": "${workspaceFolder}/imu2body/run_gimo_train.py",
             "env":{"CUDA_VISIBLE_DEVICES":"3"},
             "args": [
-                "--test_name=mocapee_vr_0820_uncertainty_nll_loss",
+                "--test_name=exp_0824_film_uncertainty_1",
                 "--mode=test",
                 "--multin=10",
-                "--config=exp_0820_uncertainty",
+                "--config=exp_0824_film_uncertainty_1",
             ],
             "cwd": "${workspaceFolder}/imu2body",
             "justMyCode": true

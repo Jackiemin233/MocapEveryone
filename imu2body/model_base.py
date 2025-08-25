@@ -629,3 +629,164 @@ class TransformerSceneFiLMModel(nn.Module):
             return contact_output.transpose(0, 1), output.transpose(0, 1)
 
         return None, output.transpose(0, 1) # [batch, seq, output_dim]
+
+
+class TransformerSceneFiLMModel_Uncertain(nn.Module):
+    def __init__(
+        self, input_dim, output_dim, hidden_dim=1024, num_layers=4, num_heads=8, dropout=0.1, estimate_contact=False,
+        context_dim: int | None = None,
+        film_mlp_hidden: int = 256,
+        film_dropout: float = 0.1,
+        film_use_gate: bool = True,
+        film_init_gamma_zero: bool = True,
+
+    ):
+        """
+        input_dim: this is the dimension of the input
+        ninp: 1024 this is the dimension of the hidden layer
+        hidden_dim: same as ninp
+        num_layers: the number of layers in transformer encoder and decoder. can be either 1 or 4
+
+        """
+        self.mid_dim = None
+        if isinstance(input_dim, tuple):
+            self.input_dim, self.mid_dim = input_dim
+
+        self.hidden_dim = hidden_dim
+
+        super(TransformerSceneFiLMModel_Uncertain, self).__init__()
+        self.model_type = "TransformerEncoder"
+
+        self.pos_encoder = PositionalEncoding(hidden_dim)
+        encoder_layer = TransformerEncoderLayer(
+            hidden_dim, num_heads, hidden_dim, dropout
+        )
+        self.transformer_encoder = TransformerEncoder(
+            encoder_layer=encoder_layer,
+            num_layers=num_layers,
+            norm=LayerNorm(hidden_dim),
+        )
+
+        # Use Linear instead of Embedding for continuous valued input
+        if self.mid_dim is not None:
+            half_hidden_dim = int(hidden_dim/2)
+            self.mid_encoder = nn.Linear(self.mid_dim, half_hidden_dim)
+            self.input_encoder = nn.Linear(self.input_dim, half_hidden_dim)
+
+        else:
+            self.encoder = nn.Linear(input_dim, hidden_dim)
+
+        self.hidden_dim = hidden_dim
+        
+        # foot fc 
+        decode_dim = hidden_dim
+
+        self.estimate_contact = estimate_contact
+        if self.estimate_contact:
+            self.contact_decoder = nn.Sequential(
+                                nn.Linear(hidden_dim, 256),
+                                nn.ReLU(),
+                                nn.Linear(256, 2)
+                )        
+            decode_dim += 2
+
+        # self.linear_decoder = nn.Sequential(
+        #                     nn.Linear(decode_dim, 256),
+        #                     nn.ReLU(),
+        #                     nn.Linear(256, output_dim)
+        #     )
+        
+        self.shared_decoder = nn.Sequential(
+                                nn.Linear(decode_dim, 256),
+                                nn.ReLU(),
+                            )
+        self.pose_mean_head   = nn.Linear(256, output_dim)  # θ^e
+        self.pose_logvar_head = nn.Linear(256, output_dim)  # log σ^2
+        
+        self.film = FiLMMod(
+                hidden_dim=hidden_dim,
+                context_dim=context_dim,
+                mlp_hidden=film_mlp_hidden,
+                dropout=film_dropout,
+                use_gate=film_use_gate,
+                init_gamma_zero=film_init_gamma_zero
+            )
+
+
+        
+        
+        self.init_weights()
+
+    def init_weights(self):
+        """Initiate parameters in the transformer model."""
+        for p in self.parameters():
+            if p.dim() > 1:
+                xavier_uniform_(p)
+
+
+    def forward(self, src, context=None, sample=True):
+        # Transformer expects src and tgt in format (len, batch_size, dim)
+        src = src.transpose(0, 1) # by transpose, [seq, batch, ninp]
+        if self.mid_dim is None:
+            projected_src = self.encoder(src) * np.sqrt(self.hidden_dim) # why add np.sqrt? [seq, batch, hidden_dim]
+        else:
+            half_hidden_dim = self.hidden_dim // 2
+            src_input, src_mid = src[...,:self.input_dim], src[...,self.input_dim:]
+            projected_input_src = self.input_encoder(src_input)
+            projected_mid_src = self.mid_encoder(src_mid)
+            projected_src = torch.cat((projected_input_src, projected_mid_src),-1) * np.sqrt(self.hidden_dim)
+
+        x = self.pos_encoder(projected_src) # [seq, batch, hidden_dim]
+        x = self.transformer_encoder(x) # [seq, batch, ninp] encoder output
+
+        if context is not None:
+            x = self.film(x, context)
+
+        contact_output = None
+        if self.estimate_contact:
+            contact_output = self.contact_decoder(x) # [seq, batch, 18]
+            x_dec = torch.cat((x, contact_output), dim=2)
+
+        # 共享干路 + 双头
+        dec_feat = self.shared_decoder(x_dec)                   # [T,B,256]
+        mean     = self.pose_mean_head(dec_feat)                    # [T,B,output_dim]
+        logvar   = self.pose_logvar_head(dec_feat)                  # [T,B,output_dim]
+
+        # 数值稳定：裁剪 logvar
+        logvar = torch.clamp(logvar, min=-10.0, max=6.0)            # σ^2 ∈ [e^-10, e^6]
+
+        if sample:
+            std  = torch.exp(0.5 * logvar)
+            
+            # 1. Naive Sampling
+            eps  = torch.randn_like(std)
+            theta = mean + std * eps
+            
+            # 2. AR(1) sampling
+            # alpha = 0.95  # 相关系数，越大越平滑
+            # alpha_new = math.sqrt(1 - alpha**2)
+            # eps = torch.randn_like(std)
+            # for t in range(1, eps.size(0)):  # [B, T, D]
+            #     eps[t, ...] = alpha * eps[t-1, ...] + alpha_new * eps[t, ...]
+            # theta = mean + std * eps
+            
+            # 3. RBF-GP Time noise 
+            # tau = 0.3                                   # 采样温度，先小后大更稳
+            # T, B, D = mean.shape
+            # # 用法：
+            # gp = GPTimeNoiseTBD(T, lengthscale=5.0, jitter=1e-6, device=mean.device, dtype=mean.dtype)  # 可缓存
+            # eps = gp.sample_eps(B, D)  # [T,B,D]
+            # theta = mean + tau * std * eps
+
+        else:
+            theta = mean
+
+        # 还原回 [B,T,*]
+        mean   = mean.transpose(0, 1)
+        logvar = logvar.transpose(0, 1)
+        theta  = theta.transpose(0, 1)
+        if self.estimate_contact:
+            contact_output = contact_output.transpose(0, 1)  # [B,T,2]
+
+        return contact_output, mean, logvar, theta
+
