@@ -132,10 +132,7 @@ class IMU2BodyNetwork(object):
         print('accelerate is Ready')
         
         # BUG For test
-        self.eval_files_gimo = glob.glob(os.path.join(self.data_path, 'gimo_test', "*.pkl"))
-        self.eval_files_egobody = glob.glob(os.path.join(self.data_path, 'egobody_test', "*.pkl"))
-        # self.eval_files_gimo = glob.glob(os.path.join(self.data_path, 'gimo_test_old', "*.pkl"))
-        # self.eval_files_egobody = glob.glob(os.path.join(self.data_path, 'egobody_test_old', "*.pkl"))
+        self.eval_files = glob.glob(os.path.join(self.eval_test_directory, "*/*.pkl"))
         self.eval_metric = ['mpjre', 'mpjpe', 'mpjve', 'pred_jitter', 'root_mpjpe', 'rootpe', 'upperpe', 'lowerpe', 'gt_jitter']
 
     def set_info(self, pretrain=False):
@@ -767,12 +764,12 @@ class IMU2BodyNetwork(object):
         render_result_dict['idx'] = []
         render_result_dict['motion'] = []
 
-        for i, filepath in tqdm(enumerate(self.eval_files_gimo)):
+        for i, filepath in tqdm(enumerate(self.eval_files)):
             with open(filepath, "rb") as file:
                 file_dict = pickle.load(file)
                 file_dict.update({"filename": filepath})
             if i == 0:
-                eval_log_per_file = self.run_per_file(file_dict=file_dict, save_name = 'gimo_eval.ply')
+                eval_log_per_file = self.run_per_file(file_dict=file_dict, save_name = 'amass_eval.ply')
             else: 
                 eval_log_per_file = self.run_per_file(file_dict=file_dict, save_name = None)
         # for iterations, sampled_batch in enumerate(tqdm(self.dataloader['validation_gimo'])):
@@ -788,7 +785,7 @@ class IMU2BodyNetwork(object):
                 self.eval_log[metric].append(eval_log_per_file[metric])
         
         print(f"Done.")
-        logging.info(f"-----------------------GIMO EVAL RESULT-----------------------------------------------")
+        logging.info(f"-----------------------AMASS EVAL RESULT-----------------------------------------------")
         for metric in self.eval_metric:
             if 'jitter' == metric:
                 continue
@@ -796,35 +793,7 @@ class IMU2BodyNetwork(object):
         print(f"metric: jitter value: {np.mean(np.array(self.eval_log['pred_jitter'])) / np.mean(np.array(self.eval_log['gt_jitter'])):.2f}")
         logging.info(f"--------------------------------------------------------------------------------------")
   
-        for i, filepath in tqdm(enumerate(self.eval_files_egobody)):
-            with open(filepath, "rb") as file:
-                file_dict = pickle.load(file)
-                file_dict.update({"filename": filepath})
-            if i == 0:
-                eval_log_per_file = self.run_per_file(file_dict=file_dict, save_name = 'egobody_eval.ply')
-            else:
-                eval_log_per_file = self.run_per_file(file_dict=file_dict, save_name = None)
-        # for iterations, sampled_batch in enumerate(tqdm(self.dataloader['validation_egobody'])):
-            # eval_log_per_file = self.run_per_file(file_dict=sampled_batch, save_name = None)
-            # if self.load_vis:
-            # 	render_result_dict['motion'].append(eval_log_per_file['motion'])
-            # 	render_result_dict['seq_len'].append(eval_log_per_file['motion'][0].num_frames())
-            # 	render_result_dict['idx'].append(filepath)
-            if eval_log_per_file['filename'] in self.eval_log_by_filename:
-                embed()
-            self.eval_log_by_filename[eval_log_per_file['filename']] = eval_log_per_file
-            for metric in self.eval_metric:
-                self.eval_log[metric].append(eval_log_per_file[metric])
-        
-        print(f"Done.")
-        logging.info(f"-----------------------Egobody EVAL RESULT--------------------------------------------")
-        for metric in self.eval_metric:
-            if 'jitter' == metric:
-                continue
-            print(f"metric: {metric} value: {np.mean(np.array(self.eval_log[metric])) * metrics_coeffs[metric]:.2f}")
-        print(f"metric: jitter value: {np.mean(np.array(self.eval_log['pred_jitter'])) / np.mean(np.array(self.eval_log['gt_jitter'])):.2f}")
-        logging.info(f"--------------------------------------------------------------------------------------")
-  
+          
     def run_per_file(self, file_dict, save_name = None):
         sampled_batch = file_dict
         total_length = sampled_batch['total_length']
@@ -856,38 +825,19 @@ class IMU2BodyNetwork(object):
         pred_rotmat = transforms.rotation_6d_to_matrix(results['pred_rot'])
         pred_rotmat[...,0:1,:,:] = start_T[...,:3,:3] @ pred_rotmat[...,0:1,:,:]
 
-        # pred_pos_to_world = results['pred_pos'].unsqueeze(-1)
-        # pred_pos_to_world = pred_pos_to_world[...,0] 
-        # pred_rotmat = transforms.rotation_6d_to_matrix(results['pred_rot'])
-        # pred_rotmat[...,0:1,:,:] = pred_rotmat[...,0:1,:,:]
-
         # get gt into world coord
         gt_pos_to_world = start_T[...,:3,:3].to(self.device) @ results['gt_pos'].unsqueeze(-1)
         gt_pos_to_world = gt_pos_to_world[...,0] + start_T[...,:3,3]
         gt_rotmat = transforms.rotation_6d_to_matrix(results['gt_rot'])
         gt_rotmat[...,0:1,:,:] = start_T[...,:3,:3] @ gt_rotmat[...,0:1,:,:]
   
-        # gt_pos_to_world = results['gt_pos'].unsqueeze(-1)
-        # gt_pos_to_world = gt_pos_to_world[...,0]
-        # gt_rotmat = transforms.rotation_6d_to_matrix(results['gt_rot'])
-        # gt_rotmat[...,0:1,:,:] = gt_rotmat[...,0:1,:,:]
-    
-        if save_name != None:
-            save_two_pointclouds_with_colors(pred_pos_to_world.clone().detach().reshape((-1,22,3)), gt_pos_to_world.clone().detach().reshape((-1,22,3)), save_name)
-
         # into single seq
         batch, seq_len, J, _ = pred_pos_to_world.shape
-
-        for idx, info in enumerate(sampled_batch['info']):
-            start_frame = int(info['start_end'][0])
+        for idx, start_frame in enumerate(sampled_batch['start_frame']):
             predicted_position[start_frame:start_frame+seq_len] = pred_pos_to_world[idx]
             predicted_rot[start_frame:start_frame+seq_len] = pred_rotmat[idx]
             gt_position[start_frame:start_frame+seq_len] = gt_pos_to_world[idx]
             gt_rot[start_frame:start_frame+seq_len] = gt_rotmat[idx]
-        # predicted_position[-1] = pred_pos_to_world[idx][-1]
-        # predicted_rot[-1] = pred_rotmat[idx][-1]
-        # gt_position[-1] = gt_pos_to_world[idx][-1]
-        # gt_rot[-1] = gt_rotmat[idx][-1]
 
         predicted_angle_np = conversions.R2A(predicted_rot.cpu().numpy())
         predicted_angle = torch.from_numpy(predicted_angle_np).cuda().float()

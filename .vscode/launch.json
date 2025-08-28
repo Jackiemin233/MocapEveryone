@@ -31,6 +31,20 @@
             "justMyCode": true
         },
         {
+            "name": "Preprocess AMASS data",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/imu2body/preprocess.py",
+            "args": [
+                "--data-config-path=./data_config/",
+                "--base-dir=../MocapEvery_Files_Download/AMASS", 
+                "--preprocess-path=preprocess_train_vr_debug",
+                "--setting=vr",
+            ],
+            "cwd": "${workspaceFolder}/imu2body",
+            "justMyCode": true
+        },
+        {
             "name": "Train MIX",
             "type": "debugpy",
             "request": "launch",
@@ -39,7 +53,7 @@
             "args": [
                 "--test_name=mocapee_vr_debug",
                 "--mode=train",
-                "--config=exp_0824_swt"
+                "--config=exp_0827_bismoother"
             ],
             "cwd": "${workspaceFolder}/imu2body",
             "justMyCode": true
