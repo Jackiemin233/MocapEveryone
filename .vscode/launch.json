@@ -53,7 +53,7 @@
             "args": [
                 "--test_name=mocapee_vr_debug",
                 "--mode=train",
-                "--config=exp_0827_bismoother"
+                "--config=exp_0829_swt_ada"
             ],
             "cwd": "${workspaceFolder}/imu2body",
             "justMyCode": true

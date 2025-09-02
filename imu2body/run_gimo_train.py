@@ -148,6 +148,7 @@ class IMU2BodyNetwork(object):
         self.num_epoch_eval	= self.config['eval']['num_epoch_eval']
         self.save_frequency = self.config['train']['save_frequency']
         self.use_uncertainty = self.config['model'].get('uncertainty_model', False)
+        self.use_swt_ada = self.config['model'].get('use_swt_ada', False)
         self.use_freq_time_decom_loss = self.config['model'].get('use_freq_time_decom_loss', False)
         self.set_skel_info() # load skeleton info (this is needed for train and test)
         
@@ -169,8 +170,9 @@ class IMU2BodyNetwork(object):
         ## copy some code to log dir as a backup
         if self.mode == "train":
             logging.info("COPYING IMPORTANT FILES")
-            copy_files = ['preprocess_train_mp.py', 'dataset.py', 'gimo.py', 'functions.py',
-                        'egobody.py', 'model.py', 'model_base.py', 'pointnet2.py', 'run_gimo_train.py', 'model_base_swt.py', 'loss.py']
+            copy_files = ['preprocess_train_mp.py', 'dataset.py', 'gimo.py', 'functions.py', 'model_base_swt_new.py', 'model_base_swt_ada.py',
+                        'egobody.py', 'model.py', 'model_base.py', 'pointnet2.py', 'run_gimo_train.py', 'model_base_swt.py', 'loss.py', 
+                        'model_base_swt_ada_cxt.py',]
             for file in copy_files:
                 os.system(f'cp -r {cur_dir}/{file} {self.code_dir}')
 
@@ -563,24 +565,31 @@ class IMU2BodyNetwork(object):
                             self.config['train']['loss_ee_weight'] * self.ee_mean_loss + \
                             self.config['train']['loss_mid_weight'] * self.mid_mean_loss + \
                             self.config['train']['loss_est_weight'] * self.est_loss + \
-                            0.6 * self.config['train']['loss_quat_weight'] * self.rotation_mse_loss + \
-                            0.6 * self.config['train']['loss_root_weight'] * self.root_mean_loss + \
+                            1.2 * self.config['train']['loss_quat_weight'] * self.rotation_mse_loss + \
+                            1.2 * self.config['train']['loss_root_weight'] * self.root_mean_loss + \
                             self.config['train']['loss_pos_weight'] * self.loss_scale3d + \
                             self.config['train']['loss_spec3d_weight'] * self.loss_spec3d                            # STFT decomposition loss weight 0.3
+                            # 0.6 * self.config['train']['loss_quat_weight'] * self.rotation_mse_loss + \
+                            # 0.6 * self.config['train']['loss_root_weight'] * self.root_mean_loss + \
         else:
             self.loss_total = self.config['train']['loss_pos_weight'] * self.pos_mean_loss + \
                             self.config['train']['loss_foot_weight'] * self.foot_pos_loss + \
                             self.config['train']['loss_ee_weight'] * self.ee_mean_loss + \
                             self.config['train']['loss_mid_weight'] * self.mid_mean_loss + \
-                            self.config['train']['loss_quat_weight'] * self.rotation_mse_loss + \
+                            1.5 * self.config['train']['loss_quat_weight'] * self.rotation_mse_loss + \
                             self.config['train']['loss_root_weight'] * self.root_mean_loss + \
                             self.config['train']['loss_est_weight'] * self.est_loss 
+                            # self.config['train']['loss_quat_weight'] * self.rotation_mse_loss + \
                             # + self.config['train']['loss_contact_weight'] * self.contact_loss
         
         if self.use_uncertainty:
             self.w_uncert = get_warmup_weight(self.train_epoch, start=0.0, end=self.config['train']['loss_uncertainty_weight'], \
                                          warmup_steps=self.config['train']['num_epoch'], start_step=self.config['train']['warmup_start_epoch'])
             self.loss_total += self.w_uncert * self.uncertainty_loss
+        
+        if self.use_swt_ada:
+            self.wavelet_arch_loss = self.model.last_wavelet_arch_loss or torch.zeros((), device=self.loss_total.device)
+            self.loss_total += self.config['train']['loss_arch_weight'] * self.wavelet_arch_loss
 
         if self.foot_vel_loss is not None:
             self.loss_total += self.config['train']['loss_vel_weight'] * self.foot_vel_loss
@@ -727,6 +736,8 @@ class IMU2BodyNetwork(object):
         # self.writer.add_scalar('loss_contact', self.contact_loss.item(), global_step = epoch * steps_per_epoch + idx)
         if self.use_uncertainty:
             self.writer.add_scalar('loss_uncertainty', self.uncertainty_loss.item(), global_step = epoch * steps_per_epoch + idx)
+        if self.use_swt_ada:
+            self.writer.add_scalar('loss_swt_ada', self.wavelet_arch_loss.item(), global_step = epoch * steps_per_epoch + idx)
         if self.use_freq_time_decom_loss:
             self.writer.add_scalar('loss_scale3d', self.loss_scale3d.item(), global_step = epoch * steps_per_epoch + idx)
             self.writer.add_scalar('loss_spec3d', self.loss_spec3d.item(), global_step = epoch * steps_per_epoch + idx)

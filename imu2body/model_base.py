@@ -514,6 +514,7 @@ class FiLMMod(nn.Module):
             return x + mod
 
 
+
 class TransformerSceneFiLMModel(nn.Module):
     def __init__(
         self, input_dim, output_dim, hidden_dim=1024, num_layers=4, num_heads=8, dropout=0.1, estimate_contact=False,
@@ -964,3 +965,88 @@ class TransformerSceneFiLMModel_Uncertain_BiSmoother(nn.Module):
             contact = None
 
         return contact, mean, logvar, theta
+
+
+class FiLMMod_(nn.Module):
+    """
+    Generic FiLM modulation over [T,B,C] features using context.
+    - context can be [B, Cc] (global) or [B, T, Cc] (timewise). When timewise, we align along T.
+    - y = (1 + gamma) * x + beta; optional gate to mix with identity.
+    """
+    def __init__(
+        self,
+        hidden_dim: int,
+        context_dim,
+        mlp_hidden: int = 256,
+        dropout: float = 0.1,
+        use_gate: bool = True,
+        init_gamma_zero: bool = True,
+        timewise: bool = False,
+    ):
+        super().__init__()
+        self.C = hidden_dim
+        self.context_dim = context_dim
+        self.use_gate = use_gate
+        self.timewise = timewise
+        self.ln_x = nn.LayerNorm(hidden_dim)
+        self.dropout = nn.Dropout(dropout)
+        if context_dim is not None:
+            self.ln_c = nn.LayerNorm(context_dim)
+            in_dim = hidden_dim + context_dim
+        else:
+            self.ln_c = None
+            in_dim = hidden_dim
+
+        self.mlp = nn.Sequential(
+            nn.Linear(in_dim, mlp_hidden),
+            nn.GELU(),
+            nn.Linear(mlp_hidden, 2 * hidden_dim)  # -> [gamma, beta]
+        )
+        self.gate_mlp = nn.Sequential(
+            nn.Linear(in_dim, mlp_hidden // 2),
+            nn.GELU(),
+            nn.Linear(mlp_hidden // 2, hidden_dim)
+        ) if use_gate else None
+
+        # init last layer of modulation to zeros for stability => gamma≈0, beta≈0 initially
+        with torch.no_grad():
+            last = self.mlp[-1]
+            if isinstance(last, nn.Linear):
+                nn.init.zeros_(last.weight)
+                nn.init.zeros_(last.bias)
+            if self.gate_mlp is not None:
+                lastg = self.gate_mlp[-1]
+                nn.init.zeros_(lastg.weight)
+                nn.init.zeros_(lastg.bias)
+
+    def forward(self, x: torch.Tensor, context = None) -> torch.Tensor:
+        # x: [T,B,C]
+        T, B, C = x.shape
+        xn = self.ln_x(x)
+        if self.context_dim is not None and context is not None:
+            if context.dim() == 2:  # [B,Cc]
+                c = self.ln_c(context).unsqueeze(0).expand(T, -1, -1)  # [T,B,Cc]
+            elif context.dim() == 3:  # [B,T,Cc]
+                if context.shape[1] != T:
+                    # broadcast time if needed
+                    c = self.ln_c(context).transpose(0, 1)
+                    if c.shape[0] != T:
+                        c = c[0:1].expand(T, -1, -1)
+                else:
+                    c = self.ln_c(context).transpose(0, 1)
+            else:
+                raise ValueError("context must be [B,Cc] or [B,T,Cc]")
+            inp = torch.cat([xn, c], dim=-1)
+        else:
+            inp = xn
+
+        gam_beta = self.mlp(self.dropout(inp))  # [T,B,2C]
+        gamma, beta = gam_beta[..., :C], gam_beta[..., C:]
+        y = (1.0 + gamma) * x + beta
+
+        if self.use_gate:
+            g = torch.sigmoid(self.gate_mlp(inp))
+            y = g * y + (1.0 - g) * x
+        return y
+
+

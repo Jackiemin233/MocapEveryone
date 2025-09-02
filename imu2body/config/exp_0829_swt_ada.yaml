@@ -1,0 +1,55 @@
+data:
+    preprocess: ../MocapEvery_Files_Download/ # Change to your path
+
+model:
+    hidden_dim1: 1280 
+    hidden_dim2: 1280
+    num_head1: 10 
+    num_head2: 10
+    sep_encoder: True 
+    # Ours
+    temporal_model: False #True # Done
+    wavelet_emb: False
+    visual_input : False # TBD
+    hand_estimator: False
+    # NEW
+    environment_enc: True
+    use_film: True
+    uncertainty_model: True
+    use_freq_time_decom_loss: True
+    use_swt: False             # NEW
+    wavelet_levels: 3
+    use_swt_ada: True
+    
+    hidden_dim_scene: 1280
+    
+train:
+    batch_size: 256 # 256
+    loss_pos_weight: 1.5
+    loss_quat_weight: 1.25
+    loss_uncertainty_weight: 0.3  # EnvPoser 0.001 | NLL 0.2
+    warmup_start_epoch: 100       # warm up of uncertainty loss
+    loss_root_weight: 1.0
+    loss_contact_weight: 0.5
+    loss_spec3d_weight: 0.1       # NOTE
+    loss_arch_weight: 0.001        # NEW
+    loss_ee_weight: 0.5
+    loss_foot_weight: 0.4
+    loss_vel_weight: 0.1
+    loss_mid_weight: 1.0
+    loss_est_weight: 0.3
+    loss_contact_weight: 0.3
+    num_epoch: 300 # 200
+    lr_decay: 0.9993
+    pretrained: ''
+    save_frequency: 4
+    loss: "l1"
+    num_workers: 4
+    
+
+test:
+    batch_size: 128
+    num_epoch: 1
+
+eval:
+    num_epoch_eval: 5 # every 5 epoch eval

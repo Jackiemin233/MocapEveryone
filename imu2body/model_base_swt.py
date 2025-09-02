@@ -415,12 +415,6 @@ class TransformerSceneFiLMModel_SWT_Uncertain(nn.Module):
             )
             decode_dim += 2
 
-        # self.linear_decoder = nn.Sequential(
-        #     nn.Linear(decode_dim, 256),
-        #     nn.ReLU(),
-        #     nn.Linear(256, output_dim)
-        # )
-
         self.shared_decoder = nn.Sequential(
                                 nn.Linear(decode_dim, 256),
                                 nn.ReLU(),
@@ -493,7 +487,7 @@ class TransformerSceneFiLMModel_SWT_Uncertain(nn.Module):
         # output = self.linear_decoder(x_dec)              # [T,B,output_dim]
             
         # 共享干路 + 双头
-        dec_feat = self.shared_decoder(x_dec)                   # [T,B,256]
+        dec_feat = self.shared_decoder(x_dec)                       # [T,B,256]
         mean     = self.pose_mean_head(dec_feat)                    # [T,B,output_dim]
         logvar   = self.pose_logvar_head(dec_feat)                  # [T,B,output_dim]
 
@@ -507,22 +501,6 @@ class TransformerSceneFiLMModel_SWT_Uncertain(nn.Module):
             eps  = torch.randn_like(std)
             theta = mean + std * eps
             
-            # 2. AR(1) sampling
-            # alpha = 0.95  # 相关系数，越大越平滑
-            # alpha_new = math.sqrt(1 - alpha**2)
-            # eps = torch.randn_like(std)
-            # for t in range(1, eps.size(0)):  # [B, T, D]
-            #     eps[t, ...] = alpha * eps[t-1, ...] + alpha_new * eps[t, ...]
-            # theta = mean + std * eps
-            
-            # 3. RBF-GP Time noise 
-            # tau = 0.3                                   # 采样温度，先小后大更稳
-            # T, B, D = mean.shape
-            # # 用法：
-            # gp = GPTimeNoiseTBD(T, lengthscale=5.0, jitter=1e-6, device=mean.device, dtype=mean.dtype)  # 可缓存
-            # eps = gp.sample_eps(B, D)  # [T,B,D]
-            # theta = mean + tau * std * eps
-
         else:
             theta = mean
 
