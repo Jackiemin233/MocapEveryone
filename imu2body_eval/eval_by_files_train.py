@@ -433,28 +433,28 @@ def load_filelist(args):
         start_end_list = list(zip(egobody_data_info['start_frame'].astype(int), egobody_data_info['end_frame'].astype(int)))
         scene_list = (egobody_data_info['scene_name'].astype(str)).tolist()
     
-        # for fnames, start_end, scene in tqdm(zip(fnames_list, start_end_list, scene_list)):
-        #     for col in egobody_data_split_info.columns:
-        #         if bool((egobody_data_split_info[col] == fnames).any()):
-        #             mode = col 
-        #             break
-        #     if mode != 'test': #Only test
-        #         continue
-        #     seqlists = {}
-        #     seqlists['fname'] = fnames
-        #     seqlists['scene'] = scene
-        #     seqlists['start_end_origin'] = start_end
-        #     seqlists['start_end'] = (0, start_end[1]-start_end[0]+1)
-        #     # print(start_end)
-        #     seqlists['transform'] = None
-        #     seqlists['body_index'] = os.listdir(os.path.join(egobody_path, f'smplx_camera_wearer_{mode}', fnames))[0]
-        #     seqlists['file'] = [f for f in os.listdir(os.path.join(egobody_path, f'smplx_camera_wearer_{mode}', fnames, seqlists['body_index'], 'results'))]
-        #     seqlists['file'].sort(key=lambda x: int(''.join(filter(str.isdigit, x))))
-        #     # print(seqlists['file'][0], seqlists['file'][-1])
-        #     assert str(start_end[0]) in seqlists['file'][0] and str(start_end[1]) in seqlists['file'][-1]
-        #     seqlists['mode'] = 'test'
-        #     seqlists['dataset'] = 'egobody'
-        #     file_lists.append(seqlists)
+        for fnames, start_end, scene in tqdm(zip(fnames_list, start_end_list, scene_list)):
+            for col in egobody_data_split_info.columns:
+                if bool((egobody_data_split_info[col] == fnames).any()):
+                    mode = col 
+                    break
+            if mode != 'test': #Only test
+                continue
+            seqlists = {}
+            seqlists['fname'] = fnames
+            seqlists['scene'] = scene
+            seqlists['start_end_origin'] = start_end
+            seqlists['start_end'] = (0, start_end[1]-start_end[0]+1)
+            # print(start_end)
+            seqlists['transform'] = None
+            seqlists['body_index'] = os.listdir(os.path.join(egobody_path, f'smplx_camera_wearer_{mode}', fnames))[0]
+            seqlists['file'] = [f for f in os.listdir(os.path.join(egobody_path, f'smplx_camera_wearer_{mode}', fnames, seqlists['body_index'], 'results'))]
+            seqlists['file'].sort(key=lambda x: int(''.join(filter(str.isdigit, x))))
+            # print(seqlists['file'][0], seqlists['file'][-1])
+            assert str(start_end[0]) in seqlists['file'][0] and str(start_end[1]) in seqlists['file'][-1]
+            seqlists['mode'] = 'test'
+            seqlists['dataset'] = 'egobody'
+            file_lists.append(seqlists)
     
     ds_scene_list = load_scene(gimo_data_info, egobody_data_info, gimo_path, egobody_path)
 
