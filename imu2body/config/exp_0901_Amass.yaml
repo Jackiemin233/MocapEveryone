@@ -1,5 +1,6 @@
 data:
-    preprocess: /home/yaonanjie/project6/orion/group # Change to your path
+    #preprocess: ../MocapEvery_Files_Download/ # Change to your path
+    preprocess: ../data/preprocess_amass_vr # Change to your path
 
 model:
     hidden_dim1: 1280 
@@ -12,14 +13,12 @@ model:
     wavelet_emb: False
     visual_input : False # TBD
     hand_estimator: False
-    # NEW
     environment_enc: True
     use_film: True
     uncertainty_model: True
     use_freq_time_decom_loss: True
-    use_swt: False             # NEW
+    use_swt: True             # NEW
     wavelet_levels: 3
-    use_wfilm: True
     
     hidden_dim_scene: 1280
     
@@ -40,7 +39,7 @@ train:
     loss_contact_weight: 0.3
     num_epoch: 300 # 200
     lr_decay: 0.9993
-    pretrained: ''
+    pretrained: '/home/yaonanjie/project6/MocapEvery/imu2body/output/train_amass_0828/model/model.pkl'
     save_frequency: 4
     loss: "l1"
     num_workers: 4

@@ -11,7 +11,7 @@ from torch.nn import TransformerEncoder, TransformerEncoderLayer
 from torch.nn import TransformerDecoder, TransformerDecoderLayer
 from torch.nn.init import xavier_uniform_
 
-from functions import GPTimeNoiseTBD
+#from functions import GPTimeNoiseTBD
 
 import random
 from IPython import embed

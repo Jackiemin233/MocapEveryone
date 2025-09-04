@@ -34,6 +34,7 @@ from tensorboardX import SummaryWriter
 """
 python3 run_eval_gimo.py --test_name=Normalized --mode=test --eval-path==/home/zhanggangjian/nanjie/project6/MocapEvery/data/gimo_dataset_processed_eval
 
+python3 run_eval_train.py --test_name=exp_0829_wfilm --mode=test --eval-path=/home/yaonanjie/project6/orion/group
 
 """
  

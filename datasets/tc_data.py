@@ -28,7 +28,6 @@ body_model = amass.load_body_model(bm_path=motion_constants.SMPLH_BM_PATH)
 skel_with_offset = amass.create_skeleton_from_amass_bodymodel(bm=body_model)	
 skel = skel_with_offset[0]
 
-
 imu_joint_names = imu_constants.imu_joint_names
 imu_joint_idx = [skel.get_index_joint(jn) for jn in imu_joint_names]
 

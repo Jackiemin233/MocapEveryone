@@ -24,10 +24,10 @@ import argparse
 import json
 
 
-import imu2body_eval.amass_smplh as amass
-body_model = amass.load_body_model(bm_path=motion_constants.SMPLH_BM_PATH)
-skel_with_offset = amass.create_skeleton_from_amass_bodymodel(bm=body_model)	
-skel = skel_with_offset[0]
+# import imu2body_eval.amass_smplh as amass
+# body_model = amass.load_body_model(bm_path=motion_constants.SMPLH_BM_PATH)
+# skel_with_offset = amass.create_skeleton_from_amass_bodymodel(bm=body_model)	
+# skel = skel_with_offset[0]
 
 
 def load_motion_and_scene(filename, only_read_motion=True):

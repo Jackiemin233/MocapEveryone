@@ -3,7 +3,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import pywt
+#import pywt
 
 from torch.nn import LayerNorm
 from torch.nn import TransformerEncoder, TransformerEncoderLayer

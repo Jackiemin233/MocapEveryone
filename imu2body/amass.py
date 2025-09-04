@@ -20,6 +20,7 @@ from fairmotion.data import bvh
 import constants.motion_data as motion_constants
 import imu2body.amass as amass
 from imu2body.functions import * 
+import trimesh
 
 # from bvh import Skeleton
 
@@ -294,11 +295,6 @@ def create_tpose(bm_path, default_beta=True):
 		mesh_seq.append(mesh)
 
 	motion = motion_class.Motion(skel=skel, fps=30)
-
-	# embed()
-
-	# if not load_motion:
-	#     return motion 
 	
 	num_joints = skel.num_joints()
 	parents = bm.kintree_table[0].long()[:num_joints]
@@ -343,28 +339,80 @@ def save():
 def load_parallel(files, cpus=20, **kwargs):
 	return utils.run_parallel(load, files, num_cpus=cpus, **kwargs)
 
-def create_mesh_from_output(output, bm, offset=None, betas = None):
-	if offset is None: # offset with default betas
-		offset = np.array([ 0.00312326, -0.35140747,  0.01203655])
+def create_mesh_from_output(output, bm, betas = None, transl = None):
   
 	frames = output.shape[0]
-	output_matrix = transforms.rotation_6d_to_matrix(output[..., 3:].reshape((frames, -1, 6)))
-	output_joint_axis = matrix_to_axis_angle(output_matrix)
+	#output_matrix = transforms.rotation_6d_to_matrix(output[..., 3:].reshape((frames, -1, 6)))
+	output_joint_axis = matrix_to_axis_angle(output)
   
 	root_orient = output_joint_axis[:, :1].reshape((frames, -1))  # controls the global root orientation (frame, 3)
 	pose_body = output_joint_axis[:, 1:].reshape((frames, -1))  # controls body joint angles (frame, 63)
-	trans = output[:, :3]  # controls root translation (frame, 3)
+	#trans = output_joint_axis[:,:3] #output[:, :3]  # controls root translation (frame, 3)
  
  	# add default hand pose
 	default_pose_hand = motion_constants.pose_hand
 	default_pose_hand = default_pose_hand.unsqueeze(0).repeat(frames, 1)
   
-	body = bm(pose_body=pose_body, root_orient=root_orient, pose_hand=default_pose_hand, betas=betas, trans=trans)
+	body = bm(pose_body=pose_body, root_orient=root_orient, pose_hand=default_pose_hand, betas=betas, trans=transl)
 	vertices_seq = body.v.numpy()
 	faces = body.f.numpy()
 
-	return vertices_seq, faces
+	mesh_seq = []
+	for v in vertices_seq:
+		mesh_seq.append(
+			trimesh.Trimesh(vertices=v, faces=faces, force_mesh=True, process=False)
+		)
+	return mesh_seq
 
+def save_mesh_with_scene(output_seq=None, gt_output_seq=None, scene_pcs=None, transl=None, 
+                         save_path='/home/yaonanjie/test.glb', interval=100):
+    # 处理预测序列
+    # output_seq = output_seq.reshape((-1, 22, 3, 3))  # (frame, 22, 3, 3)
+    # gt_output_seq = gt_output_seq.reshape((-1, 22, 3, 3)) # (frame, 22, 3, 3)
+    bm = load_body_model(bm_path=motion_constants.BM_PATH)
+    
+    output_mesh_seq = []
+    gt_mesh_seq = []
+    for i in range(output_seq.shape[0]):
+        output_seq_i = output_seq[i]
+        gt_output_seq_i = gt_output_seq[i]
+        transl_i = transl[i].unsqueeze(0)
+        output_mesh_seq_i = create_mesh_from_output(output_seq_i.detach().cpu(), bm, transl=transl_i.detach().cpu())
+        gt_mesh_seq_i = create_mesh_from_output(gt_output_seq_i.detach().cpu(), bm, transl=transl_i.detach().cpu())
+     
+        output_mesh_seq += output_mesh_seq_i
+        gt_mesh_seq += gt_mesh_seq_i
+
+    # 创建点云网格对象
+    # point_cloud = trimesh.points.PointCloud(scene_pcs.reshape(-1, 3).detach().cpu())
+    
+    # 创建场景并添加对象
+    scene = trimesh.Scene()
+    
+    # 添加预测mesh（蓝色）
+    for i, body_mesh in enumerate(output_mesh_seq):
+        if i % interval == 0:
+            # 创建预测mesh的副本并设置颜色
+            pred_mesh = body_mesh.copy()
+            pred_mesh.visual.vertex_colors = [0, 0, 255, 255]  # 蓝色
+            scene.add_geometry(pred_mesh, node_name=f"pred_mesh_{i}")
+    
+    # 添加GT mesh（绿色）
+    for i, body_mesh in enumerate(gt_mesh_seq):
+        if i % interval == 0:
+            # 创建GT mesh的副本并设置颜色
+            gt_mesh = body_mesh.copy()
+            gt_mesh.visual.vertex_colors = [0, 255, 0, 255]  # 绿色
+            scene.add_geometry(gt_mesh, node_name=f"gt_mesh_{i}")
+    
+    # 添加点云（保持原色）
+    scene.add_geometry(scene_pcs, node_name="scene_mesh")
+    
+    # 导出为GLB文件
+    scene.export(save_path, file_type='glb')
+    #point_cloud.export(save_path.replace('.glb', '_pc.ply'), file_type='ply')
+    print(f"场景已保存至: {save_path}")
+    
 
 if __name__ == "__main__":
 	bm_path = "../data/smpl_models/smplx/SMPLX_NEUTRAL.npz"

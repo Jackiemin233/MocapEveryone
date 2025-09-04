@@ -28,6 +28,7 @@ from imu2body.loss import *
 import imu2body.model
 import constants.motion_data as motion_constants
 from eval.metrics import * 
+from amass import save_mesh_with_scene
 
 from tensorboardX import SummaryWriter
 
@@ -50,6 +51,8 @@ from accelerate import Accelerator
     python run_gimo_train.py --test_name=VR_Baseline --mode=train --config=config_temporal_wilor
     
     python run_gimo_train.py --test_name=Debug_VR_wavelet --mode=train --config=config_temporal_wilor
+    
+    python run_gimo_train.py --test_name=exp_0829_wfilm --mode=test --config=exp_0828_wfilm
 '''
  
 logging.basicConfig(
@@ -853,7 +856,7 @@ class IMU2BodyNetwork(object):
         input_seq = (input_seq - self.mean) / self.std 
   
         output_tuple = self.model(input_seq.float(), input_img = input_img, input_pc = input_pc)
-  
+        
         results = self.get_loss_eval(output_tuple=output_tuple, gt_tuple=sampled_batch, \
                                     get_results=False, \
                                     get_loss=True, \
@@ -863,28 +866,29 @@ class IMU2BodyNetwork(object):
 
         # get pred into world coord
         pred_pos_to_world = start_T[...,:3,:3].to(self.device) @ results['pred_pos'].unsqueeze(-1)
-        pred_pos_to_world = pred_pos_to_world[...,0] + start_T[...,:3,3]
+        pred_pos_to_world = pred_pos_to_world[...,0] #+ start_T[...,:3,3]
         pred_rotmat = transforms.rotation_6d_to_matrix(results['pred_rot'])
         pred_rotmat[...,0:1,:,:] = start_T[...,:3,:3] @ pred_rotmat[...,0:1,:,:]
 
-        # pred_pos_to_world = results['pred_pos'].unsqueeze(-1)
-        # pred_pos_to_world = pred_pos_to_world[...,0] 
-        # pred_rotmat = transforms.rotation_6d_to_matrix(results['pred_rot'])
-        # pred_rotmat[...,0:1,:,:] = pred_rotmat[...,0:1,:,:]
-
         # get gt into world coord
         gt_pos_to_world = start_T[...,:3,:3].to(self.device) @ results['gt_pos'].unsqueeze(-1)
-        gt_pos_to_world = gt_pos_to_world[...,0] + start_T[...,:3,3]
+        gt_pos_to_world = gt_pos_to_world[...,0] #+ start_T[...,:3,3]
         gt_rotmat = transforms.rotation_6d_to_matrix(results['gt_rot'])
         gt_rotmat[...,0:1,:,:] = start_T[...,:3,:3] @ gt_rotmat[...,0:1,:,:]
-  
-        # gt_pos_to_world = results['gt_pos'].unsqueeze(-1)
-        # gt_pos_to_world = gt_pos_to_world[...,0]
-        # gt_rotmat = transforms.rotation_6d_to_matrix(results['gt_rot'])
-        # gt_rotmat[...,0:1,:,:] = gt_rotmat[...,0:1,:,:]
+        
+        # get pc into world coord
+        # start_T: 9 1 1 4 4
+        # input_pc: num, 3
+        # input_pc_to_world = start_T[...,:3,:3].to(self.device) @ input_pc.to(self.device).unsqueeze(-1)
+        # input_pc_to_world = input_pc_to_world[...,0] #+ start_T[...,:3,3]
+        # input_pc = input_pc.reshape((-1, 3))
+        scene_mesh = file_dict['scene_mesh']
     
-        if save_name != None:
-            save_two_pointclouds_with_colors(pred_pos_to_world.clone().detach().reshape((-1,22,3)), gt_pos_to_world.clone().detach().reshape((-1,22,3)), save_name)
+        print(f"Visualize {sampled_batch['filename']}...")
+            
+        save_mesh_with_scene(pred_rotmat, gt_rotmat, scene_mesh, transl = start_T[:,0,0,:3,3])
+            
+        save_two_pointclouds_with_colors(pred_pos_to_world.clone().detach().reshape((-1,22,3)), gt_pos_to_world.clone().detach().reshape((-1,22,3)), save_name)
 
         # into single seq
         batch, seq_len, J, _ = pred_pos_to_world.shape

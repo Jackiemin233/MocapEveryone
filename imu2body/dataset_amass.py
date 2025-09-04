@@ -52,6 +52,8 @@ class MotionData(Dataset):
                 del current_dict
 
             for key in self.data.keys():
+                if key == 'total_length':
+                    continue
                 self.data[key] = np.concatenate(self.data[key], axis=0)
 
         elif 'pkl' in dataset_path:
@@ -627,7 +629,7 @@ def fast_load_obj_vertices(path):
     return np.array(vertices)
 
 class TrainingDataset(data.Dataset):
-    def __init__(self, dataroot, mode='train', imu_path='/home/yaonanjie/project6/orion/group',
+    def __init__(self, dataroot, mode='train', imu_path='./preprocess_train_vr',
                 test_only=False, test_dataset='gimo'):    # BUG preprocess_train_vr_old
         self.dataroot = dataroot
         self.gimo_dataroot = os.path.join(self.dataroot, 'GIMO') # for GIMO dataset

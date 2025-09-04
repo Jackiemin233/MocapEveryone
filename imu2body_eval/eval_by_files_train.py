@@ -43,6 +43,7 @@ from datasets.hps_data import *
 import pandas as pd 
 import open3d as o3d
 import trimesh
+import json
 
 logging.basicConfig(
     format="[%(asctime)s] %(message)s",
@@ -508,3 +509,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
         
     load_filelist(args=args)
+    
+    '''
+    python eval_by_files_train.py --data-config-path=./data_config --base-dir=/home/yaonanjie/project6/orion/group --save-path=/home/yaonanjie/project6/orion/group --data-type=train --setting=vr
+    '''

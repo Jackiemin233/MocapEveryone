@@ -40,6 +40,7 @@ from tqdm import tqdm
 # for totalcapture data
 from datasets.tc_data import * 
 from datasets.hps_data import *
+import json
 import pandas as pd 
 import open3d as o3d
 import trimesh
@@ -77,12 +78,14 @@ def vis_points(scene_list, global_p, i):
     o3d.io.write_point_cloud(f'./vis/test_pcd_{i}.ply', combined_pcd)
 
 def load_scene(dataset_info_gimo, dataset_info_egobody, gimo_dataroot, egobody_dataroot, 
-               scene_downsample_points=60000):
+               scene_downsample_points=60000, load_mash = True):
     scene_list = {}
+    scene_mesh_list = {} if load_mash else None
     for i, seq in enumerate(tqdm(dataset_info_gimo['sequence_path'], desc="Loading GIMO scene")):  # for GIMO
         scene = dataset_info_gimo['scene'][i]
         scene_key = f"{scene}_{seq}"
         scene_dir = os.path.join(gimo_dataroot, scene, 'scene_obj')
+
         full_ply_path = os.path.join(scene_dir, 'scene_downsampled.ply')  # 原始场景点云
         downsample_ply_path = os.path.join(scene_dir, f'scene_downsampled_{scene_downsample_points}.ply')
 
@@ -94,8 +97,17 @@ def load_scene(dataset_info_gimo, dataset_info_egobody, gimo_dataroot, egobody_d
             raise NotImplementedError
 
         scene_list[scene_key] = scene_points
+        if load_mash:
+            if os.path.exists(os.path.join(scene_dir, 'scene_obj.obj')):
+                full_scene_mesh_path = os.path.join(scene_dir, 'scene_obj.obj')  # 原始场景网格
+                scene_mesh_list[scene_key] = trimesh.load(full_scene_mesh_path, force='mesh')
+            elif os.path.exists(os.path.join(scene_dir, 'scene.obj')):
+                full_scene_mesh_path = os.path.join(scene_dir, 'scene.obj')
+                scene_mesh_list[scene_key] = trimesh.load(full_scene_mesh_path, force='mesh')
+            else:
+                full_scene_mesh_path = os.path.join(scene_dir, 'textured_output.obj')
+                scene_mesh_list[scene_key] = trimesh.load(full_scene_mesh_path, force='mesh')
 
-    
     for i, seq in enumerate(tqdm(dataset_info_egobody['recording_name'], desc="Loading EgoBody scene")):
         scene = dataset_info_egobody['scene_name'][i]
         scene_key = f"{scene}_{seq}"
@@ -113,14 +125,13 @@ def load_scene(dataset_info_gimo, dataset_info_egobody, gimo_dataroot, egobody_d
             raise NotImplementedError
         
         scene_list[scene_key] = scene_points
+        if load_mash:
+            scene_mesh_list[scene_key] = trimesh.load(ply_path, force='mesh')
     print('Scene load done')
 
-    return scene_list
+    return scene_list, scene_mesh_list
 
-
-
-
-def load_data_from_training(base_dir, file, scene_list, setting = 'vr', gimo_dataroot=None, egobody_dataroot=None, 
+def load_data_from_training(base_dir, file, scene_list, scene_mesh_list = None, setting = 'vr', gimo_dataroot=None, egobody_dataroot=None, 
                             debug=False, normalization = False, cxt_num_points=1024, save_path=None):
     motion_list = []
     data_set_info = []
@@ -353,7 +364,12 @@ def load_data_from_training(base_dir, file, scene_list, setting = 'vr', gimo_dat
             scene_points = scene_list[scene_key].astype(np.float32)  # base scene pcd
             scene_points *= 1.0 / scale
             scene_points = (transform_norm[:3, :3] @ scene_points.T + transform_norm[:3, 3:]).T
-
+            
+            if scene_mesh_list != None:
+                scene_mesh = scene_mesh_list[scene_key]
+                scene_mesh.vertices = scene_mesh.vertices * (1.0 / scale)
+                scene_mesh.vertices = (transform_norm[:3, :3] @ scene_mesh.vertices.T + transform_norm[:3, 3:]).T
+                
             # Crop -> then map back with head_start_invert (same as your __getitem__)
             cropped = extract_points_in_bbox(scene_points, root_pose_w, radius=1.5, cxt_num_points=cxt_num_points)
             
@@ -365,13 +381,17 @@ def load_data_from_training(base_dir, file, scene_list, setting = 'vr', gimo_dat
             s = info['seq']
             scene_key = f"{scene}_{s}"
             scene_points = scene_list[scene_key].astype(np.float32)
-
+            
             cam2world_dir = os.path.join(egobody_dataroot, 'calibrations', s, 'cal_trans/kinect12_to_world')  
             with open(os.path.join(cam2world_dir, scene + '.json'), 'r') as f:
                 trans = np.array(json.load(f)['trans'])
             trans = np.linalg.inv(trans)
 
             scene_points_w = trimesh.transform_points(scene_points, trans).astype(np.float32)            
+            
+            if scene_mesh_list != None:
+                scene_mesh = scene_mesh_list[scene_key]
+                scene_mesh.vertices = trimesh.transform_points(scene_mesh.vertices, trans)
 
             cropped = extract_points_in_bbox(scene_points_w, root_pose_w, radius=1.5, cxt_num_points=cxt_num_points)
 
@@ -382,10 +402,7 @@ def load_data_from_training(base_dir, file, scene_list, setting = 'vr', gimo_dat
             out[i] = np.zeros((cxt_num_points, 3), dtype=np.float32)
     
     result_dict['scene_points'] = torch.from_numpy(np.stack(out)).float()
-
-    # vis
-    # vis_points(out, global_p, 0)
-    
+    result_dict['scene_mesh'] = scene_mesh
 
     # save
     test_save_path = os.path.join(os.path.join(save_path), f"{seq['dataset']}_test", f"{seq['fname'].replace('/', '-')}.pkl")
@@ -454,7 +471,7 @@ def load_filelist(args):
             seqlists['dataset'] = 'egobody'
             file_lists.append(seqlists)
     
-    ds_scene_list = load_scene(gimo_data_info, egobody_data_info, gimo_path, egobody_path)
+    ds_scene_list, ds_scene_mesh_list = load_scene(gimo_data_info, egobody_data_info, gimo_path, egobody_path)
 
     if args.data_type == 'train':
         os.makedirs(os.path.join(args.save_path, 'gimo_test'), exist_ok=True)
@@ -478,6 +495,7 @@ def load_filelist(args):
                         base_dir=args.base_dir,
                         file=file,
                         scene_list=ds_scene_list,
+                        scene_mesh_list = ds_scene_mesh_list, 
                         gimo_dataroot=gimo_path,
                         egobody_dataroot=egobody_path,
                         normalization=True,
@@ -499,6 +517,7 @@ def load_filelist(args):
                         base_dir=args.base_dir,
                         file=file,
                         scene_list=ds_scene_list,
+                        scene_mesh_list = ds_scene_mesh_list, 
                         gimo_dataroot=gimo_path,
                         egobody_dataroot=egobody_path,
                         normalization=True,
@@ -512,6 +531,7 @@ def load_filelist(args):
                     base_dir=args.base_dir,
                     file=file,
                     scene_list=ds_scene_list,
+                    scene_mesh_list = ds_scene_mesh_list, 
                     gimo_dataroot=gimo_path,
                     egobody_dataroot=egobody_path,
                     normalization=True,
@@ -571,3 +591,12 @@ if __name__ == "__main__":
     print(f"将使用进程数: {args.num_processes}")
     
     load_filelist(args=args)
+    
+    
+    """
+    python eval_by_files_train.py --data-config-path=./data_config --base-dir=/home/yaonanjie/project6/orion --save-path=/home/yaonanjie/project6/orion --data-type=train --setting=vr
+    
+    python eval_by_files_train.py --data-config-path=./data_config --base-dir=/home/yaonanjie/project6/orion --save-path=/home/yaonanjie/project6/orion --data-type=train --setting=vr
+        
+    /home/yaonanjie/project6/MocapEvery/imu2body/output/exp_0829_wfilm
+    """
