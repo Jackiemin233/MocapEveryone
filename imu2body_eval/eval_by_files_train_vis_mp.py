@@ -60,6 +60,7 @@ skel = skel_with_offset[0]
 imu_joint_names = imu_constants.imu_joint_names
 imu_joint_idx = [skel.get_index_joint(jn) for jn in imu_joint_names]
 
+
 bm_path = "../data/smpl_models/smplh/male/model.npz"
 smplx_bm_path = "../data/smpl_models/smplx/SMPLX_NEUTRAL.npz"
 smplh_bm_path = "../data/smpl_models/smplh/male/model.npz"
@@ -127,10 +128,58 @@ def load_scene(dataset_info_gimo, dataset_info_egobody, gimo_dataroot, egobody_d
 
     return scene_list
 
+def load_scene_mesh(dataset_info_gimo, dataset_info_egobody, gimo_dataroot, egobody_dataroot, 
+               scene_downsample_points=60000):
+    scene_list = {}
+    for i, seq in enumerate(tqdm(dataset_info_gimo['sequence_path'], desc="Loading GIMO scene")):  # for GIMO
+        scene = dataset_info_gimo['scene'][i]
+        scene_key = f"{scene}_{seq}"
+        scene_dir = os.path.join(gimo_dataroot, scene, 'scene_obj')
+        # full_mesh_path = os.path.join(scene_dir, f'scene_downsampled.ply')
+
+        if os.path.exists(os.path.join(scene_dir, 'scene_obj.obj')):
+            full_mesh_path = os.path.join(scene_dir, 'scene_obj.obj')  # 原始场景网格
+        elif os.path.exists(os.path.join(scene_dir, 'scene.obj')):
+            full_mesh_path = os.path.join(scene_dir, 'scene.obj')
+        else:
+            full_mesh_path = os.path.join(scene_dir, 'textured_output.obj')
+
+        if os.path.exists(full_mesh_path):
+            mesh = o3d.io.read_triangle_mesh(full_mesh_path)
+            mesh.compute_vertex_normals()
+            vertices = np.asarray(mesh.vertices, dtype=np.float32)
+            print(vertices.shape)
+            faces = np.asarray(mesh.triangles, dtype=np.int32)
+            print(faces.shape)
+        else:
+            raise FileNotFoundError(full_mesh_path)
+
+        scene_list[scene_key] = {"vertices": vertices, "faces": faces}
+
+    
+    for i, seq in enumerate(tqdm(dataset_info_egobody['recording_name'], desc="Loading EgoBody scene")):
+        scene = dataset_info_egobody['scene_name'][i]
+        scene_key = f"{scene}_{seq}"
+        scene_dir = os.path.join(egobody_dataroot, 'scene_mesh', scene)
+        full_mesh_path = os.path.join(scene_dir, f"{scene}.obj")
+
+        if os.path.exists(full_mesh_path):
+            mesh = o3d.io.read_triangle_mesh(full_mesh_path)
+            mesh.compute_vertex_normals()
+            vertices = np.asarray(mesh.vertices, dtype=np.float32)
+            faces = np.asarray(mesh.triangles, dtype=np.int32)
+        else:
+            raise FileNotFoundError(full_mesh_path)
+        
+        scene_list[scene_key] = {"vertices": vertices, "faces": faces}
+    print('Scene load done')
+
+    return scene_list
 
 
 
-def load_data_from_training(base_dir, file, scene_list, setting = 'vr', gimo_dataroot=None, egobody_dataroot=None, 
+
+def load_data_from_training(base_dir, file, scene_list, scene_mesh_list, setting = 'vr', gimo_dataroot=None, egobody_dataroot=None, 
                             debug=False, normalization = False, cxt_num_points=1024, save_path=None):
     motion_list = []
     data_set_info = []
@@ -334,6 +383,8 @@ def load_data_from_training(base_dir, file, scene_list, setting = 'vr', gimo_dat
 
     N = len(info_list)
     out = [None] * N
+    out_mesh_vertices = [None] * N
+    out_mesh_faces = [None] * N
 
     for i, info in enumerate(info_list):
         s = info['seq']
@@ -344,10 +395,7 @@ def load_data_from_training(base_dir, file, scene_list, setting = 'vr', gimo_dat
         head_start_invert = head_invert[i]
         root_pose_w = (head_start @ xyz_to_transform_matrices(root_pose))[0, :, :3, 3]
 
-        if info['dataset'] == 'gimo':
-
-            transform_info_file = os.path.join(gimo_dataroot, s, transform_path)
-            
+        if info['dataset'] == 'gimo':            
             transform_norm_file = os.path.join(gimo_dataroot, scene, 'scene_obj', 'transform_norm.txt')
             transform_norm = np.loadtxt(transform_norm_file).reshape((4, 4)).astype(np.float32)
 
@@ -363,12 +411,20 @@ def load_data_from_training(base_dir, file, scene_list, setting = 'vr', gimo_dat
             scene_points = scene_list[scene_key].astype(np.float32)  # base scene pcd
             scene_points *= 1.0 / scale
             scene_points = (transform_norm[:3, :3] @ scene_points.T + transform_norm[:3, 3:]).T
-
             # Crop -> then map back with head_start_invert (same as your __getitem__)
             cropped = extract_points_in_bbox(scene_points, root_pose_w, radius=1.5, cxt_num_points=cxt_num_points)
             
             cropped = (head_start_invert @ xyz_to_transform_matrices(cropped))[0, :, :3, 3]
             out[i] = cropped.astype(np.float32)
+
+            scene_mesh = scene_mesh_list[scene_key]
+            scene_mesh_vertices = scene_mesh['vertices'].astype(np.float32)
+            scene_mesh_faces = scene_mesh['faces']
+            scene_mesh_vertices *= 1.0 / scale
+            scene_mesh_vertices = (transform_norm[:3, :3] @ scene_mesh_vertices.T + transform_norm[:3, 3:]).T
+            scene_mesh_vertices_head = (head_start_invert @ xyz_to_transform_matrices(scene_mesh_vertices))[0, :, :3, 3]
+            out_mesh_vertices[i] = scene_mesh_vertices_head
+            out_mesh_faces[i] = scene_mesh_faces
 
         elif info['dataset'] == 'egobody':
             scene = info['scene']
@@ -381,24 +437,34 @@ def load_data_from_training(base_dir, file, scene_list, setting = 'vr', gimo_dat
                 trans = np.array(json.load(f)['trans'])
             trans = np.linalg.inv(trans)
 
-            scene_points_w = trimesh.transform_points(scene_points, trans).astype(np.float32)            
+            scene_points_w = trimesh.transform_points(scene_points, trans).astype(np.float32)
 
             cropped = extract_points_in_bbox(scene_points_w, root_pose_w, radius=1.5, cxt_num_points=cxt_num_points)
 
             cropped = (head_start_invert @ xyz_to_transform_matrices(cropped))[0, :, :3, 3]
             out[i] = cropped.astype(np.float32)
+
+            scene_mesh = scene_mesh_list[scene_key]
+            scene_mesh_vertices = scene_mesh['vertices'].astype(np.float32)
+            scene_mesh_faces = scene_mesh['faces']
+            scene_mesh_vertices_w = trimesh.transform_points(scene_mesh_vertices, trans).astype(np.float32)
+            scene_mesh_vertices_head = (head_start_invert @ xyz_to_transform_matrices(scene_mesh_vertices_w))[0, :, :3, 3]
+            out_mesh_vertices[i] = scene_mesh_vertices_head
+            out_mesh_faces[i] = scene_mesh_faces
         else:
             # Fallback: zero points (shouldn't happen)
             out[i] = np.zeros((cxt_num_points, 3), dtype=np.float32)
     
     result_dict['scene_points'] = torch.from_numpy(np.stack(out)).float()
+    result_dict['mesh_vertices'] = torch.from_numpy(np.stack(out_mesh_vertices)).float()
+    result_dict['mesh_faces'] = torch.from_numpy(np.stack(out_mesh_faces)).int()
 
     # vis
     # vis_points(out, global_p, 0)
     
 
     # save
-    test_save_path = os.path.join(os.path.join(save_path), f"{seq['dataset']}_test", f"{seq['fname'].replace('/', '-')}.pkl")
+    test_save_path = os.path.join(os.path.join(save_path), f"{seq['dataset']}_test_vis", f"{seq['fname'].replace('/', '-')}.pkl")
     print(f"Saving files to {test_save_path}")
     with open(test_save_path, "wb") as file:
         pickle.dump(result_dict, file, protocol=pickle.HIGHEST_PROTOCOL)
@@ -465,10 +531,11 @@ def load_filelist(args):
             file_lists.append(seqlists)
     
     ds_scene_list = load_scene(gimo_data_info, egobody_data_info, gimo_path, egobody_path)
+    scene_mesh_list = load_scene_mesh(gimo_data_info, egobody_data_info, gimo_path, egobody_path)
 
     if args.data_type == 'train':
-        os.makedirs(os.path.join(args.save_path, 'gimo_test'), exist_ok=True)
-        os.makedirs(os.path.join(args.save_path, 'egobody_test'), exist_ok=True)
+        os.makedirs(os.path.join(args.save_path, 'gimo_test_vis'), exist_ok=True)
+        os.makedirs(os.path.join(args.save_path, 'egobody_test_vis'), exist_ok=True)
 
         # for file in tqdm(file_lists, desc="Writing preprocessed file lists"):
         #     load_data_from_training(base_dir = args.base_dir, file = file, scene_list=ds_scene_list, 
@@ -488,6 +555,7 @@ def load_filelist(args):
                         base_dir=args.base_dir,
                         file=file,
                         scene_list=ds_scene_list,
+                        scene_mesh_list=scene_mesh_list,
                         gimo_dataroot=gimo_path,
                         egobody_dataroot=egobody_path,
                         normalization=True,
@@ -509,6 +577,7 @@ def load_filelist(args):
                         base_dir=args.base_dir,
                         file=file,
                         scene_list=ds_scene_list,
+                        scene_mesh_list=scene_mesh_list,
                         gimo_dataroot=gimo_path,
                         egobody_dataroot=egobody_path,
                         normalization=True,
@@ -522,6 +591,7 @@ def load_filelist(args):
                     base_dir=args.base_dir,
                     file=file,
                     scene_list=ds_scene_list,
+                    scene_mesh_list=scene_mesh_list,
                     gimo_dataroot=gimo_path,
                     egobody_dataroot=egobody_path,
                     normalization=True,

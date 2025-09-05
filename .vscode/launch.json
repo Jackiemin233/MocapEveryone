@@ -101,18 +101,18 @@
             "justMyCode": true
         },
         {
-            "name": "Test",
+            "name": "Test VIS",
             "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/imu2body/run_gimo_train.py",
             "env":{"CUDA_VISIBLE_DEVICES":"3"},
             "args": [
-                "--test_name=mocapee_vr_0820_uncertainty_nll_loss",
-                "--mode=test",
+                "--test_name=exp_0902_swt_ada_cxt",
+                "--mode=test_vis",
                 "--config=exp_0820_uncertainty"
             ],
             "cwd": "${workspaceFolder}/imu2body",
-            "justMyCode": true
+            "justMyCode": false
         },
         {
             "name": "Test multin",
