@@ -12,6 +12,8 @@ import random
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import smplx
+
 from IPython import embed 
 from typing import Callable, Dict, Optional, Tuple
 
@@ -115,6 +117,9 @@ class IMU2BodyNetwork(object):
         self.build_network_gimo()
         self.build_optimizer()
 
+        self.smplx_model = smplx.create("/home/shenwenhao/MocapEveryone/data/smpl_models/models_smplx_v1_1", model_type='smplx',
+                    gender='neutral', use_pca=False, use_face_contour=True)
+
         self.accelerator = Accelerator()
         print('accelerate is preparing')
   
@@ -126,10 +131,10 @@ class IMU2BodyNetwork(object):
         print('accelerate is Ready')
         
         # BUG For test
-        self.eval_files_gimo = glob.glob(os.path.join(self.data_path, 'gimo_test', "*.pkl"))
-        self.eval_files_egobody = glob.glob(os.path.join(self.data_path, 'egobody_test', "*.pkl"))
-        # self.eval_files_gimo = glob.glob(os.path.join(self.data_path, 'gimo_test_old', "*.pkl"))
-        # self.eval_files_egobody = glob.glob(os.path.join(self.data_path, 'egobody_test_old', "*.pkl"))
+        # self.eval_files_gimo = glob.glob(os.path.join(self.data_path, 'gimo_test', "*.pkl"))
+        # self.eval_files_egobody = glob.glob(os.path.join(self.data_path, 'egobody_test', "*.pkl"))
+        self.eval_files_gimo = glob.glob(os.path.join(self.data_path, 'gimo_test_vis', "*.pkl"))
+        self.eval_files_egobody = glob.glob(os.path.join(self.data_path, 'egobody_test_vis', "*.pkl"))
         self.eval_metric = ['mpjre', 'mpjpe', 'mpjve', 'pred_jitter', 'root_mpjpe', 'rootpe', 'upperpe', 'lowerpe', 'gt_jitter']
 
     def set_info(self, pretrain=False):
@@ -838,6 +843,211 @@ class IMU2BodyNetwork(object):
 
         return eval_log
 
+    def eval_vis(self):
+        logging.info(f"Eval with testset ...")
+        self.teacher_forcing_ratio = 0
+        self.model.eval()
+
+        self.eval_log = {}
+        for metric in self.eval_metric:
+            self.eval_log[metric] = []
+        
+        count = 0
+        filenames = []
+        self.eval_log_by_filename = {}
+
+        render_result_dict = {}
+        render_result_dict['fps'] = 30.0
+        render_result_dict['seq_len'] = []
+        render_result_dict['idx'] = []
+        render_result_dict['motion'] = []
+
+        for i, filepath in tqdm(enumerate(self.eval_files_gimo)):
+            with open(filepath, "rb") as file:
+                file_dict = pickle.load(file)
+                file_dict.update({"filename": filepath})
+            eval_log_per_file = self.run_per_file_vis(file_dict=file_dict, save_name = f'vis_envposer/gimo_eval_{i:03d}.ply')
+            if eval_log_per_file['filename'] in self.eval_log_by_filename:
+                embed()
+            self.eval_log_by_filename[eval_log_per_file['filename']] = eval_log_per_file
+            for metric in self.eval_metric:
+                self.eval_log[metric].append(eval_log_per_file[metric])
+        
+        print(f"Done.")
+        logging.info(f"-----------------------GIMO EVAL RESULT-----------------------------------------------")
+        for metric in self.eval_metric:
+            if 'jitter' == metric:
+                continue
+            print(f"metric: {metric} value: {np.mean(np.array(self.eval_log[metric])) * metrics_coeffs[metric]:.2f}")
+        print(f"metric: jitter value: {np.mean(np.array(self.eval_log['pred_jitter'])) / np.mean(np.array(self.eval_log['gt_jitter'])):.2f}")
+        logging.info(f"--------------------------------------------------------------------------------------")
+  
+        for i, filepath in tqdm(enumerate(self.eval_files_egobody)):
+            with open(filepath, "rb") as file:
+                file_dict = pickle.load(file)
+                file_dict.update({"filename": filepath})
+            eval_log_per_file = self.run_per_file_vis(file_dict=file_dict, save_name = f'vis_envposer/egobody_eval_{i:03d}.ply')
+            if eval_log_per_file['filename'] in self.eval_log_by_filename:
+                embed()
+            self.eval_log_by_filename[eval_log_per_file['filename']] = eval_log_per_file
+            for metric in self.eval_metric:
+                self.eval_log[metric].append(eval_log_per_file[metric])
+        
+        print(f"Done.")
+        logging.info(f"-----------------------Egobody EVAL RESULT--------------------------------------------")
+        for metric in self.eval_metric:
+            if 'jitter' == metric:
+                continue
+            print(f"metric: {metric} value: {np.mean(np.array(self.eval_log[metric])) * metrics_coeffs[metric]:.2f}")
+        print(f"metric: jitter value: {np.mean(np.array(self.eval_log['pred_jitter'])) / np.mean(np.array(self.eval_log['gt_jitter'])):.2f}")
+        logging.info(f"--------------------------------------------------------------------------------------")
+  
+    def run_per_file_vis(self, file_dict, save_name = None):
+        sampled_batch = file_dict
+        total_length = sampled_batch['total_length']
+        # create placeholder for pred pos, pred rot, gt pos and gt rot
+        predicted_position = torch.zeros(size=(total_length, motion_constants.NUM_JOINTS, 3))
+        predicted_rot = torch.zeros(size=(total_length, motion_constants.NUM_JOINTS, 3, 3))
+        gt_position = torch.zeros(size=(total_length, motion_constants.NUM_JOINTS, 3))
+        gt_rot = torch.zeros(size=(total_length, motion_constants.NUM_JOINTS, 3, 3))
+
+        input_seq = sampled_batch['input_seq'].to(self.device)
+        input_global_p = sampled_batch['global_p'].to(self.device)
+        head_p = input_global_p[:, :, motion_constants.JOINT_NAMES.index('Head')]
+        input_pc = sampled_batch['scene_points'].to(self.device)
+  
+        # norm_input
+        input_seq = (input_seq - self.mean) / self.std
+
+        
+        output_tuple = self.model(input_seq, VS = input_pc, p_head = head_p, sample_from_mean=True) # hand (mid), foot, final_output (body)
+        
+        scene_vertices = sampled_batch['mesh_vertices'].to(self.device)
+        scene_faces = sampled_batch['mesh_faces'].to(self.device)
+
+        results = self.get_loss_eval(output_tuple=output_tuple, gt_tuple=sampled_batch, \
+                                    get_results=False, \
+                                    get_loss=True, \
+                                    is_eval=True) 
+        
+        start_T = sampled_batch['head_start'].to(self.device) # Start pos
+
+        # get pred into world coord
+        pred_pos_to_world = start_T[...,:3,:3].to(self.device) @ results['pred_pos'].unsqueeze(-1)
+        pred_pos_to_world = pred_pos_to_world[...,0] + start_T[...,:3,3]
+        pred_rotmat = transforms.rotation_6d_to_matrix(results['pred_rot'])
+        pred_rotmat[...,0:1,:,:] = start_T[...,:3,:3] @ pred_rotmat[...,0:1,:,:]
+
+        # get gt into world coord
+        gt_pos_to_world = start_T[...,:3,:3].to(self.device) @ results['gt_pos'].unsqueeze(-1)
+        gt_pos_to_world = gt_pos_to_world[...,0] + start_T[...,:3,3]
+        gt_rotmat = transforms.rotation_6d_to_matrix(results['gt_rot'])
+        gt_rotmat[...,0:1,:,:] = start_T[...,:3,:3] @ gt_rotmat[...,0:1,:,:]
+
+        pc_to_world = start_T[...,:3,:3].to(self.device) @ input_pc.unsqueeze(-1).unsqueeze(2)
+        pc_to_world = pc_to_world[..., 0] + start_T[...,:3,3]
+
+        scene_vertices_to_world = start_T[...,:3,:3].to(self.device) @ scene_vertices.unsqueeze(-1).unsqueeze(2)
+        scene_vertices_to_world = scene_vertices_to_world[..., 0] + start_T[...,:3,3]
+
+        # into single seq
+        batch, seq_len, J, _ = pred_pos_to_world.shape
+
+        for idx, info in enumerate(sampled_batch['info']):
+            start_frame = int(info['start_end'][0])
+            predicted_position[start_frame:start_frame+seq_len] = pred_pos_to_world[idx]
+            predicted_rot[start_frame:start_frame+seq_len] = pred_rotmat[idx]
+            gt_position[start_frame:start_frame+seq_len] = gt_pos_to_world[idx]
+            gt_rot[start_frame:start_frame+seq_len] = gt_rotmat[idx]
+
+        pred_aa_24 = torch.Tensor(conversions.R2A(predicted_rot))
+        pred_global_orient = pred_aa_24[:, 0]                                        # [B,3]
+        pred_body_pose = pred_aa_24[:, 1:].reshape(total_length, 21*3)
+
+        gt_aa_24 = torch.Tensor(conversions.R2A(gt_rot))
+        gt_global_orient = gt_aa_24[:, 0]                                        # [B,3]
+        gt_body_pose = gt_aa_24[:, 1:].reshape(total_length, 21*3)
+
+        # Betas
+        betas = torch.zeros(total_length, 10)
+        zero_pose = torch.zeros(total_length, 10)
+
+        # Build SMPL layer
+        pred_output = self.smplx_model(
+            global_orient=pred_global_orient,   # [B,3]
+            body_pose=pred_body_pose,           # [B,69]
+            betas=betas,                   # [B,10]
+            left_hand_pose=torch.zeros((total_length, 45)), 
+            right_hand_pose=torch.zeros((total_length, 45)),
+            jaw_pose=torch.zeros((total_length, 3)), 
+            leye_pose=torch.zeros((total_length, 3)),
+            reye_pose=torch.zeros((total_length, 3)),
+            expression=torch.zeros((total_length, 10)),
+        )
+        pred_vertices = pred_output.vertices.detach() - pred_output.joints.detach()[:, 0:1] + predicted_position[:, 0:1]
+        smplx_faces = self.smplx_model.faces
+        save_two_meshes_with_colors(pred_vertices[::30], smplx_faces,
+                                    scene_vertices_to_world[0].detach().reshape(-1, 3),
+                                    scene_faces[0],
+                                    smpl_color = [1.0, 0.75, 0.8],
+                                    filename=os.path.splitext(save_name)[0] + "_pred" + os.path.splitext(save_name)[1])
+        gt_output = self.smplx_model(
+            global_orient=gt_global_orient,   # [B,3]
+            body_pose=gt_body_pose,           # [B,69]
+            betas=betas,                   # [B,10]
+            left_hand_pose=torch.zeros((total_length, 45)), 
+            right_hand_pose=torch.zeros((total_length, 45)),
+            jaw_pose=torch.zeros((total_length, 3)), 
+            leye_pose=torch.zeros((total_length, 3)),
+            reye_pose=torch.zeros((total_length, 3)),
+            expression=torch.zeros((total_length, 10)),
+        )
+        gt_vertices = gt_output.vertices.detach() - gt_output.joints.detach()[:, 0:1] + gt_position[:, 0:1]
+        save_two_meshes_with_colors(gt_vertices[::20], smplx_faces,
+                                    scene_vertices_to_world[0].detach().reshape(-1, 3),
+                                    scene_faces[0],
+                                    smpl_color = [0.53, 0.81, 0.98],
+                                    filename=os.path.splitext(save_name)[0] + "_gt" + os.path.splitext(save_name)[1])
+        predicted_angle_np = conversions.R2A(predicted_rot.cpu().numpy())
+        predicted_angle = torch.from_numpy(predicted_angle_np).cuda().float()
+        predicted_root_angle = predicted_angle[...,0,:] 
+
+        gt_angle_np = conversions.R2A(gt_rot.cpu().numpy()) 
+        gt_angle = torch.from_numpy(gt_angle_np).cuda().float() 
+        gt_root_angle = gt_angle[...,0,:] 
+                
+        # after running iterations get numbers
+        upper_index = [3, 6, 9, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21]
+        lower_index = [0, 1, 2, 4, 5, 7, 8] # 10,11 is not considered in imus. (why? TIP does not have ankle joints)
+        hand_index = [20, 21]
+        foot_index = [7, 8]
+        eval_log = {}
+        for metric in self.eval_metric:
+            eval_metric = get_metric_function(metric)(
+                    predicted_position,
+                    predicted_angle,
+                    predicted_root_angle,
+                    gt_position,
+                    gt_angle,
+                    gt_root_angle,
+                    upper_index,
+                    lower_index,
+                    hand_index,
+                    foot_index,
+                    fps=motion_constants.FPS,
+                    root_rel=True
+                ).cpu().numpy()
+            eval_log[metric] = eval_metric 
+        
+        # add filename
+        parts = sampled_batch['filename'].split('/')
+        filename = '/'.join(parts[-1:])
+        eval_log['filename'] = filename
+        torch.cuda.empty_cache()
+
+        return eval_log
+
+
     def eval_multin(self):
         logging.info(f"Eval multiple hypothesis with testset ...")
         self.teacher_forcing_ratio = 0
@@ -1042,7 +1252,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     #parser.add_argument("--config_file", type=str, default="")
     parser.add_argument("--test_name", type=str, default="")
-    parser.add_argument("--mode", type=str, default="", choices=["test", "train", "custom"])
+    parser.add_argument("--mode", type=str, default="", choices=["test", "train", "custom", "test_vis"])
     parser.add_argument("--multin", type=int, default=1)
     parser.add_argument("--config", type=str, default="")
     parser.add_argument("--setting", type=str, default="vr", choices = ['hmc', 'vr'])
@@ -1066,5 +1276,11 @@ if __name__ == "__main__":
         else:
             with torch.no_grad():
                 imu2body_network.eval()
+    elif args.mode == 'test_vis':
+        imu2body_network.pretrain = True
+        imu2body_network.build_network_gimo()
+        imu2body_network.model.cuda()
+        with torch.no_grad():
+            imu2body_network.eval_vis()
     else:
         imu2body_network.run(mode=args.mode)

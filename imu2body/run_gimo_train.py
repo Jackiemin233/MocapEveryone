@@ -995,14 +995,15 @@ class IMU2BodyNetwork(object):
         input_img = None
         input_pc = sampled_batch['scene_points'].to(self.device)
 
-        scene_vertices = sampled_batch['mesh_vertices'].to(self.device)
-        scene_faces = sampled_batch['mesh_faces'].to(self.device)
   
         # norm_input
         input_seq = (input_seq - self.mean) / self.std 
 
         output_tuple = self.model(input_seq.float(), input_img = input_img, input_pc = input_pc)
 
+        scene_vertices = sampled_batch['mesh_vertices'].to(self.device)
+        scene_faces = sampled_batch['mesh_faces'].to(self.device)
+        
         results = self.get_loss_eval(output_tuple=output_tuple, gt_tuple=sampled_batch, \
                                     get_results=False, \
                                     get_loss=True, \
