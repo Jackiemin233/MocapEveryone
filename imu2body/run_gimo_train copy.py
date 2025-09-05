@@ -436,6 +436,7 @@ class IMU2BodyNetwork(object):
     def get_loss(self, output_tuple, gt_tuple, get_results=False, get_loss=True, is_eval=False):
         if self.use_uncertainty:
             mid_ee, contact_output, output_seq, sampled_output, pred_logvar = output_tuple
+            # mid_ee, contact_output, _, output_seq, pred_logvar = output_tuple           # Use random sampled results
         else:
             mid_ee, contact_output, output_seq = output_tuple
 
@@ -445,49 +446,34 @@ class IMU2BodyNetwork(object):
         tgt_seq = gt_tuple['tgt_seq'].to(self.device) # [batch, seq_len, dim]
         global_pos = gt_tuple['global_p'].to(self.device)
         root = gt_tuple['root'].to(self.device)
-        gt_contact_label = gt_tuple['contact_label'].to(self.device)
+        #gt_contact_label = gt_tuple['contact_label'].to(self.device)
 
-        # normalize root (provide answer root pos by teacher forcing ration)
         output_root = output_seq[...,:3]
         output_joint_rot = output_seq[...,3:]
         output_joint_rot = output_joint_rot.reshape(batch, seq_len, -1, 6)
         target_joint_rot = tgt_seq[...,3:].reshape(batch, seq_len, -1, 6)
 
-        idx_teacher = []
-        idx_else = []
-        for i in range(seq_len):
-            if random.random() < self.teacher_forcing_ratio:
-                idx_teacher.append(i)
-            else:
-                idx_else.append(i)
-
-        root_view = root.reshape(batch, seq_len, 3)
-        root_mix = output_root.clone()
-        output_joint_rot_root_mix = output_joint_rot.clone()
-
-        if len(idx_teacher) > 0:
-            root_mix[:,idx_teacher,:] = root_view[:,idx_teacher,:]		
-            output_joint_rot_root_mix[:,idx_teacher, 0, ...] = target_joint_rot[:, idx_teacher, 0, ...]
-
-        output_joint_rot_root_mix = transforms.rotation_6d_to_matrix(output_joint_rot_root_mix)
+        output_joint_rotmat = transforms.rotation_6d_to_matrix(output_joint_rot)
 
         if not get_loss:
             return (output_root, transforms.rotation_6d_to_matrix(output_joint_rot)) if get_results else None
 
         # compare pos & ee 
         if self.skel_offset.shape[0] != batch:
-            output_pos_mat = rot_matrix_fk_tensor(output_joint_rot_root_mix, root_mix, self.skel_offset[0:batch], self.skel_parent)
+            output_pos_mat = rot_matrix_fk_tensor(output_joint_rotmat, output_root, self.skel_offset[0:batch], self.skel_parent)
         else:
-            output_pos_mat = rot_matrix_fk_tensor(output_joint_rot_root_mix, root_mix, self.skel_offset, self.skel_parent)
+            output_pos_mat = rot_matrix_fk_tensor(output_joint_rotmat, output_root, self.skel_offset, self.skel_parent)
 
         if is_eval:
             result_dict = {}
-            result_dict['pred_pos'] = output_pos_mat.clone()
-            result_dict['pred_rot'] = output_joint_rot.clone()
-            result_dict['gt_pos'] = global_pos.clone()
-            result_dict['gt_rot'] = target_joint_rot.clone()
+            result_dict['pred_pos'] = output_pos_mat.clone().detach()
+            result_dict['pred_rot'] = output_joint_rot.clone().detach()
+            result_dict['gt_pos'] = global_pos.clone().detach()
+            result_dict['gt_rot'] = target_joint_rot.clone().detach()
+   
             return result_dict
-
+        
+        change_mode_epoch = 40
         root_diff = torch.abs(output_seq[...,:3] - tgt_seq[...,:3]) / self.x_std[...,0,:]
 
         # add root rot
@@ -504,40 +490,19 @@ class IMU2BodyNetwork(object):
         self.ee_mean_loss = torch.mean(ee_diff)
         self.foot_pos_loss = torch.mean(foot_diff)
 
-        # TODO: balance loss weight; check decompostition loss
-        if self.use_freq_time_decom_loss:
-            # ===== 3D 分带损（替代 pos_mean_loss + foot_vel_loss）=====
-            # self.loss_scale3d, aux_scale = self.scale3d(output_pos_mat, global_pos)
-            # 构造与原来一致的 std（如果你已经有 self.x_std，形状 [B,1,J,3] 或 [1,1,J,3]）
-            x_std_for_loss = self.x_std  # 保持与你原pos_diff一致
-            # 关节权重（可选）：脚/末端权重更大，例如脚=2.0，其余=1.0
-            joint_w = torch.ones((22,), device=self.device)
-            joint_w[self.foot_idx] = 2.0
-
-            # warmup（比如 0→1 在线性 10 epoch 内）
-            alpha = get_warmup_weight(self.train_epoch, start=0.0, end=1.0, \
-                                         warmup_steps=self.config['train']['num_epoch'], start_step=change_loss_epoch)
-
-            self.loss_scale3d, aux_scale = self.scale3d(
-                output_pos_mat, global_pos,
-                x_std=x_std_for_loss, joint_weight=joint_w, warmup_alpha=alpha
-            )
-
-            # ===== STFT 分带损（小权重辅助）=====
-            self.loss_spec3d, aux_spec = self.stft3d(output_pos_mat, global_pos)
-
         # 标准 Gaussian NLL
         if self.use_uncertainty:
             uncertainty_nll_loss = 0.5 * torch.exp(-pred_logvar) * (tgt_seq - output_seq)**2 + 0.5 * pred_logvar
             self.uncertainty_loss = uncertainty_nll_loss.mean()
             
-            # EnvPoser 写法
+            # EnvPoser 写法: BAD
             # eps = 1e-8
             # delta = torch.exp(0.5 * pred_logvar)
             # scaled_err = (tgt_seq - output_seq) / (delta + eps)
             # data_term = torch.linalg.vector_norm(scaled_err, ord=2, dim=-1)  # L2 (非平方)
             # reg_term  = torch.log(torch.linalg.vector_norm(delta, ord=2, dim=-1) + eps)
             # self.uncertainty_loss = (data_term + reg_term).mean()
+
         
         self.foot_vel_loss = None
         if self.train_epoch > change_mode_epoch:
@@ -553,43 +518,38 @@ class IMU2BodyNetwork(object):
         mid_pos_diff = torch.abs(mid_ee_reshape - mid_seq_reshape) / self.x_std[...,self.mid_ee_idx,:]
         self.mid_mean_loss = torch.mean(mid_pos_diff)
 
+        # est loss 
         mid_est_diff = torch.abs(output_pos_mat[...,self.mid_ee_idx,:] - mid_ee_reshape) / self.x_std[...,self.mid_ee_idx,:]
+
         self.est_loss = torch.mean(mid_est_diff)
 
         # contact classifier loss
-        # self.contact_loss = self.contact_criterion(contact_output, gt_contact_label)
+        self.contact_loss = self.contact_criterion(contact_output, gt_contact_label)
 
-        if self.use_freq_time_decom_loss and self.train_epoch > change_loss_epoch:
+        if self.use_freq_time_decom_loss:
             self.loss_total = \
                             self.config['train']['loss_foot_weight'] * self.foot_pos_loss + \
                             self.config['train']['loss_ee_weight'] * self.ee_mean_loss + \
                             self.config['train']['loss_mid_weight'] * self.mid_mean_loss + \
                             self.config['train']['loss_est_weight'] * self.est_loss + \
-                            1.2 * self.config['train']['loss_quat_weight'] * self.rotation_mse_loss + \
-                            1.2 * self.config['train']['loss_root_weight'] * self.root_mean_loss + \
+                            self.config['train']['loss_contact_weight'] * self.contact_loss + \
+                            0.5 * self.config['train']['loss_quat_weight'] * self.rotation_mse_loss + \
+                            0.6 * self.config['train']['loss_root_weight'] * self.root_mean_loss + \
                             self.config['train']['loss_pos_weight'] * self.loss_scale3d + \
                             self.config['train']['loss_spec3d_weight'] * self.loss_spec3d                            # STFT decomposition loss weight 0.3
-                            # 0.6 * self.config['train']['loss_quat_weight'] * self.rotation_mse_loss + \
-                            # 0.6 * self.config['train']['loss_root_weight'] * self.root_mean_loss + \
         else:
             self.loss_total = self.config['train']['loss_pos_weight'] * self.pos_mean_loss + \
                             self.config['train']['loss_foot_weight'] * self.foot_pos_loss + \
                             self.config['train']['loss_ee_weight'] * self.ee_mean_loss + \
                             self.config['train']['loss_mid_weight'] * self.mid_mean_loss + \
-                            1.5 * self.config['train']['loss_quat_weight'] * self.rotation_mse_loss + \
+                            self.config['train']['loss_quat_weight'] * self.rotation_mse_loss + \
                             self.config['train']['loss_root_weight'] * self.root_mean_loss + \
-                            self.config['train']['loss_est_weight'] * self.est_loss 
-                            # self.config['train']['loss_quat_weight'] * self.rotation_mse_loss + \
-                            # + self.config['train']['loss_contact_weight'] * self.contact_loss
+                            self.config['train']['loss_est_weight'] * self.est_loss + \
+                            self.config['train']['loss_contact_weight'] * self.contact_loss
         
         if self.use_uncertainty:
-            self.w_uncert = get_warmup_weight(self.train_epoch, start=0.0, end=self.config['train']['loss_uncertainty_weight'], \
-                                         warmup_steps=self.config['train']['num_epoch'], start_step=self.config['train']['warmup_start_epoch'])
             self.loss_total += self.w_uncert * self.uncertainty_loss
         
-        if self.use_swt_ada:
-            self.wavelet_arch_loss = self.model.last_wavelet_arch_loss or torch.zeros((), device=self.loss_total.device)
-            self.loss_total += self.config['train']['loss_arch_weight'] * self.wavelet_arch_loss
 
         if self.foot_vel_loss is not None:
             self.loss_total += self.config['train']['loss_vel_weight'] * self.foot_vel_loss
@@ -786,6 +746,12 @@ class IMU2BodyNetwork(object):
                 eval_log_per_file = self.run_per_file(file_dict=file_dict, save_name = 'gimo_eval.ply')
             else: 
                 eval_log_per_file = self.run_per_file(file_dict=file_dict, save_name = None)
+        # for iterations, sampled_batch in enumerate(tqdm(self.dataloader['validation_gimo'])):
+        #     eval_log_per_file = self.run_per_file(file_dict=sampled_batch, save_name = None)
+            # if self.load_vis:
+            # 	render_result_dict['motion'].append(eval_log_per_file['motion'])
+            # 	render_result_dict['seq_len'].append(eval_log_per_file['motion'][0].num_frames())
+            # 	render_result_dict['idx'].append(filepath)
             if eval_log_per_file['filename'] in self.eval_log_by_filename:
                 embed()
             self.eval_log_by_filename[eval_log_per_file['filename']] = eval_log_per_file
@@ -809,6 +775,12 @@ class IMU2BodyNetwork(object):
                 eval_log_per_file = self.run_per_file(file_dict=file_dict, save_name = 'egobody_eval.ply')
             else:
                 eval_log_per_file = self.run_per_file(file_dict=file_dict, save_name = None)
+        # for iterations, sampled_batch in enumerate(tqdm(self.dataloader['validation_egobody'])):
+            # eval_log_per_file = self.run_per_file(file_dict=sampled_batch, save_name = None)
+            # if self.load_vis:
+            # 	render_result_dict['motion'].append(eval_log_per_file['motion'])
+            # 	render_result_dict['seq_len'].append(eval_log_per_file['motion'][0].num_frames())
+            # 	render_result_dict['idx'].append(filepath)
             if eval_log_per_file['filename'] in self.eval_log_by_filename:
                 embed()
             self.eval_log_by_filename[eval_log_per_file['filename']] = eval_log_per_file

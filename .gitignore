@@ -4,6 +4,7 @@ __pycache__
 vis/
 /data/
 output
+imu2body/output_envposer/
 results
 /libraries/MASt3R-SLAM
 /libraries/S2Fusion
