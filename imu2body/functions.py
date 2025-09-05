@@ -797,20 +797,22 @@ def extract_feet_contacts(pos, lfoot_idx, rfoot_idx, velfactor=0.02):
 
     return contacts_l, contacts_r
 
-def save_two_pointclouds_with_colors(pc1: torch.Tensor, pc2: torch.Tensor, filename: str = "colored_pointcloud.ply"):
-    assert pc1.shape == pc2.shape and pc1.ndim == 3, "Expected shape [180, 22, 3] for both tensors"
+def save_two_pointclouds_with_colors(pc1: torch.Tensor, pc2: torch.Tensor, scene: torch.Tensor, filename: str = "colored_pointcloud.ply"):
+    assert pc1.ndim == 3, "Expected shape [180, 22, 3] for both tensors"
     
     # [180, 22, 3] -> [180*22, 3]
     pc1_points = pc1.reshape(-1, 3).cpu().numpy()
     pc2_points = pc2.reshape(-1, 3).cpu().numpy()
+    scene_points = scene.reshape(-1, 3).cpu().numpy()
 
     # 用红色标记 pc1, 蓝色标记 pc2
     red_color = np.tile(np.array([[1.0, 0.0, 0.0]]), (pc1_points.shape[0], 1))
     blue_color = np.tile(np.array([[0.0, 0.0, 1.0]]), (pc2_points.shape[0], 1))
+    green_color = np.tile(np.array([[0.0, 1.0, 0.0]]), (scene_points.shape[0], 1))
 
     # 合并点云和颜色
-    all_points = np.concatenate([pc1_points, pc2_points], axis=0)
-    all_colors = np.concatenate([red_color, blue_color], axis=0)
+    all_points = np.concatenate([pc1_points, pc2_points, scene_points], axis=0)
+    all_colors = np.concatenate([red_color, blue_color, green_color], axis=0)
 
     # 创建 Open3D 点云对象
     pcd = o3d.geometry.PointCloud()
@@ -823,6 +825,61 @@ def save_two_pointclouds_with_colors(pc1: torch.Tensor, pc2: torch.Tensor, filen
 
     # 可视化（可选）
     # o3d.visualization.draw_geometries([pcd])
+
+def expand_faces_for_batch(faces: torch.Tensor, B: int, N: int):
+    """
+    faces: [F, 3], 单份faces
+    B: batch size
+    N: 每个batch的顶点数
+    """
+    all_faces = []
+    for b in range(B):
+        offset = b * N
+        all_faces.append(faces + offset)
+    return np.vstack(all_faces)  # [B*F, 3]
+
+
+def save_two_meshes_with_colors(
+    pc1: torch.Tensor, faces1: torch.Tensor,
+    scene: torch.Tensor,
+    scene_faces: torch.Tensor,
+    smpl_color = [1.0, 0.75, 0.8],
+    filename: str = "all_in_one.ply"
+):
+    # 转 numpy
+    pc1_points = pc1.cpu().numpy()
+    B, N, _ = pc1_points.shape
+    faces1 = expand_faces_for_batch(faces1, B, N)
+    faces1_np = faces1.astype(np.int32)
+    scene_faces = scene_faces.cpu().numpy().astype(np.int32)
+    scene_points = scene.reshape(-1, 3).cpu().numpy()
+
+    # mesh1
+    mesh1 = o3d.geometry.TriangleMesh()
+    mesh1.vertices = o3d.utility.Vector3dVector(pc1_points.reshape(-1, 3))
+    mesh1.triangles = o3d.utility.Vector3iVector(faces1_np)
+    mesh1.paint_uniform_color(smpl_color)  # 粉嫩的粉红色
+
+
+    # scene 作为“没有面的 mesh”
+    scene_mesh = o3d.geometry.TriangleMesh()
+    scene_mesh.vertices = o3d.utility.Vector3dVector(scene_points)
+    scene_mesh.triangles = o3d.utility.Vector3iVector(scene_faces)  # 空faces
+    scene_mesh.paint_uniform_color([0.8, 0.8, 0.8])
+    # scene_mesh.vertex_colors = o3d.utility.Vector3dVector(
+    #     np.tile([0.0, 1.0, 0.0], (scene_points.shape[0], 1))
+    # )
+
+    mesh1.compute_vertex_normals()
+    scene_mesh.compute_vertex_normals()
+    # 合并
+    merged = mesh1 + scene_mesh
+    merged.compute_vertex_normals()
+
+    # 写入
+    o3d.io.write_triangle_mesh(filename, merged, write_vertex_colors=True)
+    print(f"Saved all geometries into {filename}")
+
 
 def xyz_to_transform_matrices(points):
     """
