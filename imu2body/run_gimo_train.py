@@ -866,24 +866,29 @@ class IMU2BodyNetwork(object):
 
         # get pred into world coord
         pred_pos_to_world = start_T[...,:3,:3].to(self.device) @ results['pred_pos'].unsqueeze(-1)
-        pred_pos_to_world = pred_pos_to_world[...,0] #+ start_T[...,:3,3]
+        pred_pos_to_world = pred_pos_to_world[...,0] + start_T[...,:3,3]
         pred_rotmat = transforms.rotation_6d_to_matrix(results['pred_rot'])
         pred_rotmat[...,0:1,:,:] = start_T[...,:3,:3] @ pred_rotmat[...,0:1,:,:]
 
         # get gt into world coord
         gt_pos_to_world = start_T[...,:3,:3].to(self.device) @ results['gt_pos'].unsqueeze(-1)
-        gt_pos_to_world = gt_pos_to_world[...,0] #+ start_T[...,:3,3]
+        gt_pos_to_world = gt_pos_to_world[...,0] + start_T[...,:3,3]
         gt_rotmat = transforms.rotation_6d_to_matrix(results['gt_rot'])
         gt_rotmat[...,0:1,:,:] = start_T[...,:3,:3] @ gt_rotmat[...,0:1,:,:]
         
         # get pc into world coord
         # start_T: 9 1 1 4 4
         # input_pc: num, 3
-        # input_pc_to_world = start_T[...,:3,:3].to(self.device) @ input_pc.to(self.device).unsqueeze(-1)
-        # input_pc_to_world = input_pc_to_world[...,0] #+ start_T[...,:3,3]
-        # input_pc = input_pc.reshape((-1, 3))
+        input_pc_to_world = start_T[...,:3,:3].to(self.device) @ input_pc.to(self.device).unsqueeze(-1)
+        input_pc_to_world = input_pc_to_world[...,0] + start_T[...,:3,3]
+        input_pc_to_world = input_pc_to_world.reshape((-1,3))
+        import trimesh
+
         scene_mesh = file_dict['scene_mesh']
-    
+        scene_vertices = scene_mesh.vertices
+        scene_vertices = start_T[...,:3,:3].detach().cpu().numpy() @ scene_vertices[..., np.newaxis]
+        scene_mesh.vertices = scene_vertices[..., 0] + start_T[...,:3,3].detach().cpu().numpy()
+        
         print(f"Visualize {sampled_batch['filename']}...")
             
         save_mesh_with_scene(pred_rotmat, gt_rotmat, scene_mesh, transl = start_T[:,0,0,:3,3])
@@ -899,10 +904,6 @@ class IMU2BodyNetwork(object):
             predicted_rot[start_frame:start_frame+seq_len] = pred_rotmat[idx]
             gt_position[start_frame:start_frame+seq_len] = gt_pos_to_world[idx]
             gt_rot[start_frame:start_frame+seq_len] = gt_rotmat[idx]
-        # predicted_position[-1] = pred_pos_to_world[idx][-1]
-        # predicted_rot[-1] = pred_rotmat[idx][-1]
-        # gt_position[-1] = gt_pos_to_world[idx][-1]
-        # gt_rot[-1] = gt_rotmat[idx][-1]
 
         predicted_angle_np = conversions.R2A(predicted_rot.cpu().numpy())
         predicted_angle = torch.from_numpy(predicted_angle_np).cuda().float()

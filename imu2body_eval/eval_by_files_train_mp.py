@@ -363,12 +363,14 @@ def load_data_from_training(base_dir, file, scene_list, scene_mesh_list = None, 
             scene_key = s.replace('/', '_')
             scene_points = scene_list[scene_key].astype(np.float32)  # base scene pcd
             scene_points *= 1.0 / scale
-            scene_points = (transform_norm[:3, :3] @ scene_points.T + transform_norm[:3, 3:]).T
+            scene_points = (transform_norm[:3, :3] @ scene_points.T + transform_norm[:3, 3:]).T #            #trimesh.Trimesh(scene_points).export('/home/yaonanjie/test_pc.ply')
             
             if scene_mesh_list != None:
                 scene_mesh = scene_mesh_list[scene_key]
-                scene_mesh.vertices = scene_mesh.vertices * (1.0 / scale)
-                scene_mesh.vertices = (transform_norm[:3, :3] @ scene_mesh.vertices.T + transform_norm[:3, 3:]).T
+                scene_mesh_vertices = scene_mesh.vertices.astype(np.float32) 
+                scene_mesh_vertices *= 1.0 / scale
+                scene_mesh_vertices = (transform_norm[:3, :3] @ scene_mesh_vertices.T + transform_norm[:3, 3:]).T
+                scene_mesh.vertices = (head_start_invert @ xyz_to_transform_matrices(scene_mesh_vertices))[0, :, :3, 3] #scene_mesh.export('/home/yaonanjie/test.scene.obj')
                 
             # Crop -> then map back with head_start_invert (same as your __getitem__)
             cropped = extract_points_in_bbox(scene_points, root_pose_w, radius=1.5, cxt_num_points=cxt_num_points)
@@ -391,7 +393,9 @@ def load_data_from_training(base_dir, file, scene_list, scene_mesh_list = None, 
             
             if scene_mesh_list != None:
                 scene_mesh = scene_mesh_list[scene_key]
-                scene_mesh.vertices = trimesh.transform_points(scene_mesh.vertices, trans)
+                scene_mesh_vertices = scene_mesh.vertices.astype(np.float32)
+                scene_mesh_vertices = trimesh.transform_points(scene_mesh_vertices, trans)
+                scene_mesh.vertices = (head_start_invert @ xyz_to_transform_matrices(scene_mesh_vertices))[0, :, :3, 3]
 
             cropped = extract_points_in_bbox(scene_points_w, root_pose_w, radius=1.5, cxt_num_points=cxt_num_points)
 
@@ -591,7 +595,6 @@ if __name__ == "__main__":
     print(f"将使用进程数: {args.num_processes}")
     
     load_filelist(args=args)
-    
     
     """
     python eval_by_files_train.py --data-config-path=./data_config --base-dir=/home/yaonanjie/project6/orion --save-path=/home/yaonanjie/project6/orion --data-type=train --setting=vr
