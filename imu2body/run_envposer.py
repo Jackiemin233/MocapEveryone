@@ -117,8 +117,8 @@ class IMU2BodyNetwork(object):
         self.build_network_gimo()
         self.build_optimizer()
 
-        self.smplx_model = smplx.create("/home/shenwenhao/MocapEveryone/data/smpl_models/models_smplx_v1_1", model_type='smplx',
-                    gender='neutral', use_pca=False, use_face_contour=True)
+        self.smplx_model = smplx.create("../data/smpl_models", model_type='smplx',
+                           gender='neutral', use_pca=False, use_face_contour=True, flat_hand_mean=True)
 
         self.accelerator = Accelerator()
         print('accelerate is preparing')
@@ -866,7 +866,7 @@ class IMU2BodyNetwork(object):
             with open(filepath, "rb") as file:
                 file_dict = pickle.load(file)
                 file_dict.update({"filename": filepath})
-            eval_log_per_file = self.run_per_file_vis(file_dict=file_dict, save_name = f'vis_envposer/gimo_eval_{i:03d}.ply')
+            eval_log_per_file = self.run_per_file_vis(file_dict=file_dict, save_name = f'vis/gimo_eval_{i:03d}.ply', vis_interval=30)
             if eval_log_per_file['filename'] in self.eval_log_by_filename:
                 embed()
             self.eval_log_by_filename[eval_log_per_file['filename']] = eval_log_per_file
@@ -886,7 +886,7 @@ class IMU2BodyNetwork(object):
             with open(filepath, "rb") as file:
                 file_dict = pickle.load(file)
                 file_dict.update({"filename": filepath})
-            eval_log_per_file = self.run_per_file_vis(file_dict=file_dict, save_name = f'vis_envposer/egobody_eval_{i:03d}.ply')
+            eval_log_per_file = self.run_per_file_vis(file_dict=file_dict, save_name = f'vis_envposer/egobody_eval_{i:03d}.ply', vis_interval=90)
             if eval_log_per_file['filename'] in self.eval_log_by_filename:
                 embed()
             self.eval_log_by_filename[eval_log_per_file['filename']] = eval_log_per_file
@@ -902,7 +902,7 @@ class IMU2BodyNetwork(object):
         print(f"metric: jitter value: {np.mean(np.array(self.eval_log['pred_jitter'])) / np.mean(np.array(self.eval_log['gt_jitter'])):.2f}")
         logging.info(f"--------------------------------------------------------------------------------------")
   
-    def run_per_file_vis(self, file_dict, save_name = None):
+    def run_per_file_vis(self, file_dict, save_name = None, vis_interval=30):
         sampled_batch = file_dict
         total_length = sampled_batch['total_length']
         # create placeholder for pred pos, pred rot, gt pos and gt rot
@@ -986,7 +986,7 @@ class IMU2BodyNetwork(object):
         )
         pred_vertices = pred_output.vertices.detach() - pred_output.joints.detach()[:, 0:1] + predicted_position[:, 0:1]
         smplx_faces = self.smplx_model.faces
-        save_two_meshes_with_colors(pred_vertices[::30], smplx_faces,
+        save_two_meshes_with_colors(pred_vertices[::vis_interval], smplx_faces,
                                     scene_vertices_to_world[0].detach().reshape(-1, 3),
                                     scene_faces[0],
                                     smpl_color = [1.0, 0.75, 0.8],
@@ -1003,7 +1003,7 @@ class IMU2BodyNetwork(object):
             expression=torch.zeros((total_length, 10)),
         )
         gt_vertices = gt_output.vertices.detach() - gt_output.joints.detach()[:, 0:1] + gt_position[:, 0:1]
-        save_two_meshes_with_colors(gt_vertices[::20], smplx_faces,
+        save_two_meshes_with_colors(gt_vertices[::vis_interval], smplx_faces,
                                     scene_vertices_to_world[0].detach().reshape(-1, 3),
                                     scene_faces[0],
                                     smpl_color = [0.53, 0.81, 0.98],
