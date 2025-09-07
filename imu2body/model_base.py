@@ -321,6 +321,7 @@ class CrossAttention(nn.Module):
 
     def forward(self, x, context):
         # x: [B,T,E], context: [B,Tc,E] 或 [B,1,E]
+        print(f"######## GATE VALUE: {self.gate} ########")
         q = self.norm_q(x)
         kv = self.norm_kv(context)
         out, _ = self.attn(query=q, key=kv, value=kv, need_weights=False)
@@ -331,7 +332,7 @@ class CrossAttention(nn.Module):
 
 class TransformerSceneEncoderModel(nn.Module):
     def __init__(
-        self, input_dim, output_dim, hidden_dim=1024, num_layers=4, num_heads=8, dropout=0.1, estimate_contact=False
+        self, input_dim, output_dim, hidden_dim=1024, num_layers=4, num_heads=8, num_ca_heads=8, dropout=0.1, estimate_contact=False
     ):
         """
         input_dim: this is the dimension of the input
@@ -388,7 +389,7 @@ class TransformerSceneEncoderModel(nn.Module):
                             nn.Linear(256, output_dim)
             )
         
-        self.cross_attn = CrossAttention(hidden_dim, num_heads)
+        self.cross_attn = CrossAttention(hidden_dim, num_ca_heads)
 
         
         

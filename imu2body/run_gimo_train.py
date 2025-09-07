@@ -41,7 +41,7 @@ from accelerate import Accelerator
  
     For training logs:
     tensorboard --logdir=/home/zhanggangjian/nanjie/project6/MocapEvery/imu2body/output/lstm --host=127.0.0.1
- 
+
     For test:
     python3 run_gimo.py --test_name=lstm_40 --mode=test
  

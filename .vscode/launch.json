@@ -49,11 +49,11 @@
             "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/imu2body/run_gimo_train.py",
-            "env":{"CUDA_VISIBLE_DEVICES":"0"},
+            "env":{"CUDA_VISIBLE_DEVICES":"1"},
             "args": [
                 "--test_name=mocapee_vr_debug",
                 "--mode=train",
-                "--config=exp_0829_swt_ada_cxt"
+                "--config=exp_0907_swt_ada_cxt_ca_ee"
             ],
             "cwd": "${workspaceFolder}/imu2body",
             "justMyCode": true

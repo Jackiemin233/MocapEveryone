@@ -40,6 +40,7 @@ class IMU2BodyModel(nn.Module):
         self.use_wfilm = model_config.get('use_wfilm', False)
         self.use_swt_ada = model_config.get('use_swt_ada', False)
         self.use_swt_ada_cxt = model_config.get('use_swt_ada_cxt', False)
+        self.use_ca_ee = model_config.get('use_ca_ee', False)       # use CA for ee prediction
 
         if self.environment_enc:
             self.pcd_encoder = PointNet2Encoder()
@@ -52,13 +53,22 @@ class IMU2BodyModel(nn.Module):
         if self.visual_input:
             pass
         
-        # imu + head -> ee pose 
-        self.imu2hand = TransformerEncoderModel(
-            input_dim=input_dim,
-            output_dim=mid_dim,
-            hidden_dim=model_config['hidden_dim1'],
-            num_heads=model_config['num_head1'],
-        )
+        # imu + head -> ee pose
+        if self.use_ca_ee:
+            self.imu2hand = TransformerSceneEncoderModel(
+                input_dim=input_dim,
+                output_dim=mid_dim,
+                hidden_dim=model_config['hidden_dim1'],
+                num_heads=model_config['num_head1'],
+                num_ca_heads=8,
+            )
+        else:
+            self.imu2hand = TransformerEncoderModel(
+                input_dim=input_dim,
+                output_dim=mid_dim,
+                hidden_dim=model_config['hidden_dim1'],
+                num_heads=model_config['num_head1'],
+            )
 
         # imu + head + ee pose -> contact, output
         if self.environment_enc:
@@ -173,8 +183,8 @@ class IMU2BodyModel(nn.Module):
         self.hand2body.init_weights()
     
     def forward(self, input_seq, input_img = None, input_pc = None):
-        # if self.environment_enc:
-        #     scene_feats, scene_global_feats = self.environment_enc(input_pc.repeat(1, 1, 2)) #[64, 1280, 10000], [64, 1280]
+        # input_seq:[B, T, 31]
+        # ee:       [B, T, 6]
         _, ee = self.imu2hand(input_seq) # hand: [batch, seq, 12]
         input_concat = torch.cat((input_seq, ee), -1)  #concatenate input and hand | ee: [batch, seq, 135]
         if self.environment_enc:
