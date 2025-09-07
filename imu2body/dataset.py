@@ -765,8 +765,10 @@ class TrainingDataset(data.Dataset):
         global_p = torch.from_numpy(self.imu_data['global_p'][index]).float()
         if len(self.imu_data['contact_label']) > 0:
             contact_label = torch.from_numpy(self.imu_data['contact_label'][index]).float()
+        elif self.mode != 'train':
+            contact_label = torch.ones((40, 2)).float()
         else:
-            contact_label = 1.
+            contact_label = None
         local_rot = torch.from_numpy(self.imu_data['local_rot'][index]).float()
         head_start = self.imu_data['head_start'][index]
         head_start_invert = self.imu_data['head_start_invert'][index]

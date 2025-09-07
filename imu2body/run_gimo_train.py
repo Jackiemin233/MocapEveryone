@@ -399,6 +399,7 @@ class IMU2BodyNetwork(object):
         
         self.w_uncert = 0.
         self.eval()
+        self.run(mode="validation") 
         self.loss_total_min = 100000
         self.train_epoch = 0
         for epoch in range(self.config['train']['num_epoch']):
