@@ -563,7 +563,7 @@ class IMU2BodyNetwork(object):
         self.est_loss = torch.mean(mid_est_diff)
 
         # contact classifier loss
-        # self.contact_loss = self.contact_criterion(contact_output, gt_contact_label)
+        self.contact_loss = self.contact_criterion(contact_output, gt_contact_label)
 
         if self.use_freq_time_decom_loss and self.train_epoch > change_loss_epoch:
             self.loss_total = \
@@ -574,7 +574,8 @@ class IMU2BodyNetwork(object):
                             1.2 * self.config['train']['loss_quat_weight'] * self.rotation_mse_loss + \
                             1.2 * self.config['train']['loss_root_weight'] * self.root_mean_loss + \
                             self.config['train']['loss_pos_weight'] * self.loss_scale3d + \
-                            self.config['train']['loss_spec3d_weight'] * self.loss_spec3d                            # STFT decomposition loss weight 0.3
+                            self.config['train']['loss_spec3d_weight'] * self.loss_spec3d + \
+                            self.config['train']['loss_contact_weight'] * self.contact_loss
                             # 0.6 * self.config['train']['loss_quat_weight'] * self.rotation_mse_loss + \
                             # 0.6 * self.config['train']['loss_root_weight'] * self.root_mean_loss + \
         else:
@@ -584,9 +585,9 @@ class IMU2BodyNetwork(object):
                             self.config['train']['loss_mid_weight'] * self.mid_mean_loss + \
                             1.5 * self.config['train']['loss_quat_weight'] * self.rotation_mse_loss + \
                             self.config['train']['loss_root_weight'] * self.root_mean_loss + \
-                            self.config['train']['loss_est_weight'] * self.est_loss 
+                            self.config['train']['loss_est_weight'] * self.est_loss + \
+                            self.config['train']['loss_contact_weight'] * self.contact_loss
                             # self.config['train']['loss_quat_weight'] * self.rotation_mse_loss + \
-                            # + self.config['train']['loss_contact_weight'] * self.contact_loss
         
         if self.use_uncertainty:
             self.w_uncert = get_warmup_weight(self.train_epoch, start=0.0, end=self.config['train']['loss_uncertainty_weight'], \
@@ -845,9 +846,9 @@ class IMU2BodyNetwork(object):
   
         # norm_input
         input_seq = (input_seq - self.mean) / self.std 
-
+  
         output_tuple = self.model(input_seq.float(), input_img = input_img, input_pc = input_pc)
-
+  
         results = self.get_loss_eval(output_tuple=output_tuple, gt_tuple=sampled_batch, \
                                     get_results=False, \
                                     get_loss=True, \
@@ -866,9 +867,12 @@ class IMU2BodyNetwork(object):
         gt_pos_to_world = gt_pos_to_world[...,0] + start_T[...,:3,3]
         gt_rotmat = transforms.rotation_6d_to_matrix(results['gt_rot'])
         gt_rotmat[...,0:1,:,:] = start_T[...,:3,:3] @ gt_rotmat[...,0:1,:,:]
-
-        pc_to_world = start_T[...,:3,:3].to(self.device) @ input_pc.unsqueeze(-1).unsqueeze(2)
-        pc_to_world = pc_to_world[..., 0] + start_T[...,:3,3]
+      
+        if save_name != None:
+            save_two_pointclouds_with_colors(predicted_position.clone().detach().reshape((-1,22,3)), 
+                                             gt_position.clone().detach().reshape((-1,22,3)), 
+                                             save_name,
+                                            )
 
         # into single seq
         batch, seq_len, J, _ = pred_pos_to_world.shape
@@ -879,9 +883,6 @@ class IMU2BodyNetwork(object):
             predicted_rot[start_frame:start_frame+seq_len] = pred_rotmat[idx]
             gt_position[start_frame:start_frame+seq_len] = gt_pos_to_world[idx]
             gt_rot[start_frame:start_frame+seq_len] = gt_rotmat[idx]
-
-        if save_name != None:
-            save_two_pointclouds_with_colors(predicted_position.clone().detach().reshape((-1,22,3)), gt_position.clone().detach().reshape((-1,22,3)), pc_to_world.detach().reshape(-1, 3), save_name)
 
 
         predicted_angle_np = conversions.R2A(predicted_rot.cpu().numpy())
