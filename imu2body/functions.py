@@ -797,22 +797,26 @@ def extract_feet_contacts(pos, lfoot_idx, rfoot_idx, velfactor=0.02):
 
     return contacts_l, contacts_r
 
-def save_two_pointclouds_with_colors(pc1: torch.Tensor, pc2: torch.Tensor, scene: torch.Tensor, filename: str = "colored_pointcloud.ply"):
+def save_two_pointclouds_with_colors(pc1: torch.Tensor, pc2: torch.Tensor, filename: str = "colored_pointcloud.ply", scene: torch.Tensor = None):
     assert pc1.ndim == 3, "Expected shape [180, 22, 3] for both tensors"
     
     # [180, 22, 3] -> [180*22, 3]
     pc1_points = pc1.reshape(-1, 3).cpu().numpy()
     pc2_points = pc2.reshape(-1, 3).cpu().numpy()
-    scene_points = scene.reshape(-1, 3).cpu().numpy()
 
     # 用红色标记 pc1, 蓝色标记 pc2
     red_color = np.tile(np.array([[1.0, 0.0, 0.0]]), (pc1_points.shape[0], 1))
     blue_color = np.tile(np.array([[0.0, 0.0, 1.0]]), (pc2_points.shape[0], 1))
-    green_color = np.tile(np.array([[0.0, 1.0, 0.0]]), (scene_points.shape[0], 1))
+    if scene is not None:
+        scene_points = scene.reshape(-1, 3).cpu().numpy()
+        green_color = np.tile(np.array([[0.0, 1.0, 0.0]]), (scene_points.shape[0], 1))
 
-    # 合并点云和颜色
-    all_points = np.concatenate([pc1_points, pc2_points, scene_points], axis=0)
-    all_colors = np.concatenate([red_color, blue_color, green_color], axis=0)
+        # 合并点云和颜色
+        all_points = np.concatenate([pc1_points, pc2_points, scene_points], axis=0)
+        all_colors = np.concatenate([red_color, blue_color, green_color], axis=0)
+    else:
+        all_points = np.concatenate([pc1_points, pc2_points], axis=0)
+        all_colors = np.concatenate([red_color, blue_color], axis=0)
 
     # 创建 Open3D 点云对象
     pcd = o3d.geometry.PointCloud()
