@@ -93,6 +93,9 @@ class IMU2BodyNetwork(object):
         directory = "./output_agrol/" + args.test_name + "/"
         if not os.path.exists(directory):
             os.makedirs(directory)
+        
+        if not os.path.exists("./vis_agrol/"):
+            os.makedirs("./vis_agrol/")
 
         self.directory = directory
         self.mode = args.mode
