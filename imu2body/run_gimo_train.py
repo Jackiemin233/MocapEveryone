@@ -1136,7 +1136,7 @@ class IMU2BodyNetwork(object):
         return eval_log
 
 
-    def eval_multin(self):
+    def eval_multin(self, is_vis=False):
         logging.info(f"Eval multiple hypothesis with testset ...")
         self.teacher_forcing_ratio = 0
         self.model.eval()
@@ -1159,9 +1159,9 @@ class IMU2BodyNetwork(object):
             with open(filepath, "rb") as file:
                 file_dict = pickle.load(file)
                 file_dict.update({"filename": filepath})
-            if i == 0:
-                eval_log_per_file = self.run_multin_per_file(file_dict=file_dict, multin=args.multin, save_name = 'gimo_eval.ply')
-            else: 
+            if is_vis:
+                eval_log_per_file = self.run_multin_per_file_vis(file_dict=file_dict, save_name = f'vis_multin/gimo_eval_{i:03d}.ply', vis_interval=30)
+            else:
                 eval_log_per_file = self.run_multin_per_file(file_dict=file_dict, multin=args.multin, save_name = None)
             if eval_log_per_file['filename'] in self.eval_log_by_filename:
                 embed()
@@ -1182,8 +1182,8 @@ class IMU2BodyNetwork(object):
             with open(filepath, "rb") as file:
                 file_dict = pickle.load(file)
                 file_dict.update({"filename": filepath})
-            if i == 0:
-                eval_log_per_file = self.run_multin_per_file(file_dict=file_dict, multin=args.multin, save_name = 'egobody_eval.ply')
+            if is_vis:
+                eval_log_per_file = self.run_multin_per_file_vis(file_dict=file_dict, save_name = f'vis_multin/egobody_eval_{i:03d}.ply', vis_interval=90)
             else: 
                 eval_log_per_file = self.run_multin_per_file(file_dict=file_dict, multin=args.multin, save_name = None)
             if eval_log_per_file['filename'] in self.eval_log_by_filename:
@@ -1336,6 +1336,203 @@ class IMU2BodyNetwork(object):
 
         return eval_log
 
+    def run_multin_per_file_vis(self, file_dict, multin=5, save_name = None, vis_interval=30):
+        sampled_batch = file_dict
+        total_length = sampled_batch['total_length']
+
+        input_seq = sampled_batch['input_seq'].to(self.device)
+        input_img = None
+        input_pc = sampled_batch['scene_points'].to(self.device)
+  
+        # norm_input
+        input_seq = (input_seq - self.mean) / self.std 
+  
+        output_tuple = self.model(input_seq.float(), input_img = input_img, input_pc = input_pc)
+
+        scene_vertices = sampled_batch['mesh_vertices'].to(self.device)
+        scene_faces = sampled_batch['mesh_faces'].to(self.device)
+  
+        _, _, pred_mean, _, pred_logvar = output_tuple
+        B, T, D = pred_mean.shape
+
+        tgt_seq = sampled_batch['tgt_seq'].to(self.device) # [batch, seq_len, dim]
+        global_pos = sampled_batch['global_p'].to(self.device)
+        root = sampled_batch['root'].to(self.device)
+
+        output_mean_total = torch.zeros(size=(total_length, D))
+        output_logvar_total = torch.zeros(size=(total_length, D))
+        tgt_seq_total = torch.zeros(size=(total_length, D))
+        tgt_global_p_total = torch.zeros(size=(total_length, global_pos.size(-2), 3))
+
+
+        tau = 0.3   # NOTE hard code control noise strength
+        for idx, info in enumerate(sampled_batch['info']):
+            start_frame = int(info['start_end'][0])
+            output_mean_total[start_frame:start_frame+T] = pred_mean[idx]
+            output_logvar_total[start_frame:start_frame+T] = pred_logvar[idx]
+            tgt_seq_total[start_frame:start_frame+T] = tgt_seq[idx]
+            tgt_global_p_total[start_frame:start_frame+T] = global_pos[idx]
+        
+        output_mean_total = output_mean_total.unsqueeze(1).repeat(1, multin, 1)
+        output_logvar_total = output_logvar_total.unsqueeze(1).repeat(1, multin, 1)
+        tgt_seq_total = tgt_seq_total.unsqueeze(1).repeat(1, multin, 1).to(self.device)
+        tgt_global_p_total = tgt_global_p_total.unsqueeze(1).repeat(1, multin, 1, 1).to(self.device)            # T_total, multin, 22, 3
+        tgt_global_p_total = tgt_global_p_total.permute(1, 0, 2, 3)
+        output_std_total  = torch.exp(0.5 * output_logvar_total)                        # T_total, multin, D
+
+        gp = GPTimeNoiseTBD(total_length, lengthscale=5.0, jitter=1e-6, device=output_mean_total.device, dtype=output_mean_total.dtype)  # 可缓存
+        eps = gp.sample_eps(multin, D)  # [T,B,D]
+        output_theta_total = output_mean_total + tau * output_std_total * eps
+        output_theta_total = output_theta_total.permute(1, 0, 2).to(self.device)            # multin, T_tot, D
+
+        output_root = output_theta_total[...,:3]
+        output_joint_rot = output_theta_total[...,3:]
+        output_joint_rot = output_joint_rot.reshape(multin, total_length, -1, 6)
+        target_joint_rot = tgt_seq_total[...,3:].permute(1, 0, 2).reshape(multin, total_length, -1, 6)
+
+        output_joint_rotmat = transforms.rotation_6d_to_matrix(output_joint_rot)
+
+        # compare pos & ee 
+        if self.skel_offset.shape[0] != total_length:
+            output_pos_mat = rot_matrix_fk_tensor(output_joint_rotmat, output_root, self.skel_offset[0:total_length], self.skel_parent)
+        else:
+            output_pos_mat = rot_matrix_fk_tensor(output_joint_rotmat, output_root, self.skel_offset, self.skel_parent)
+
+        results = {}
+        results['pred_pos'] = output_pos_mat.clone().detach()               # multin, T_tot, 22, 3
+        results['pred_rot'] = output_joint_rot.clone().detach()             # multin, T_tot, 22, 6
+        results['gt_pos'] = tgt_global_p_total.clone().detach()             # multin, T_tot, 22, 3
+        results['gt_rot'] = target_joint_rot.clone().detach()               # multin, T_tot, 22, 6
+
+        start_T = sampled_batch['head_start'].to(self.device) # Start pos   B,1,1,4,4
+        
+        predicted_position = torch.zeros_like(results['pred_pos'])
+        pred_rotmat = transforms.rotation_6d_to_matrix(results['pred_rot'])
+        gt_position = torch.zeros_like(results['gt_pos'])
+        gt_rotmat = transforms.rotation_6d_to_matrix(results['gt_rot'])
+        for idx, info in enumerate(sampled_batch['info']):
+            start_frame = int(info['start_end'][0])
+            predicted_position[:, start_frame:start_frame+T] = (start_T[idx, ...,:3,:3] @ results['pred_pos'][:, start_frame:start_frame+T].unsqueeze(-1)).squeeze(-1)
+            predicted_position[:, start_frame:start_frame+T, 0] = predicted_position[:, start_frame:start_frame+T, 0] + start_T[idx, ...,:3,3]
+            pred_rotmat[:, start_frame:start_frame+T, 0:1, :, :] = start_T[idx, ...,:3,:3] @ pred_rotmat[:, start_frame:start_frame+T, 0:1, :, :]
+
+            gt_position[:, start_frame:start_frame+T] = (start_T[idx, ...,:3,:3] @ results['gt_pos'][:, start_frame:start_frame+T].unsqueeze(-1)).squeeze(-1)
+            gt_position[:, start_frame:start_frame+T, 0] = gt_position[:, start_frame:start_frame+T, 0] + start_T[idx, ...,:3,3]
+            gt_rotmat[:, start_frame:start_frame+T, 0:1, :, :] = start_T[idx, ...,:3,:3] @ gt_rotmat[:, start_frame:start_frame+T, 0:1, :, :]
+        
+        pc_to_world = start_T[...,:3,:3].to(self.device) @ input_pc.unsqueeze(-1).unsqueeze(2)
+        pc_to_world = pc_to_world[..., 0] + start_T[...,:3,3]
+
+        scene_vertices_to_world = start_T[...,:3,:3].to(self.device) @ scene_vertices.unsqueeze(-1).unsqueeze(2)
+        scene_vertices_to_world = scene_vertices_to_world[..., 0] + start_T[...,:3,3]           # B, num_of_points, 1, 3
+
+
+        for k in range(multin):
+            predicted_rot = pred_rotmat[k].clone().cpu()
+            gt_rot = gt_rotmat[k].clone().cpu()
+            pred_aa_24 = torch.Tensor(conversions.R2A(predicted_rot))
+            pred_global_orient = pred_aa_24[:, 0]                                        # [B,3]
+            pred_body_pose = pred_aa_24[:, 1:].reshape(total_length, 21*3)
+
+            gt_aa_24 = torch.Tensor(conversions.R2A(gt_rot))
+            gt_global_orient = gt_aa_24[:, 0]                                        # [B,3]
+            gt_body_pose = gt_aa_24[:, 1:].reshape(total_length, 21*3)
+
+            # Betas
+            betas = torch.zeros(total_length, 10)
+            zero_pose = torch.zeros(total_length, 10)
+
+            # Build SMPL layer
+            pred_output = self.smplx_model(
+                global_orient=pred_global_orient,   # [B,3]
+                body_pose=pred_body_pose,           # [B,69]
+                betas=betas,                   # [B,10]
+                left_hand_pose=torch.zeros((total_length, 45)), 
+                right_hand_pose=torch.zeros((total_length, 45)),
+                jaw_pose=torch.zeros((total_length, 3)), 
+                leye_pose=torch.zeros((total_length, 3)),
+                reye_pose=torch.zeros((total_length, 3)),
+                expression=torch.zeros((total_length, 10)),
+            )
+            pred_vertices = pred_output.vertices.detach() - pred_output.joints.detach()[:, 0:1] + predicted_position[k, :, 0:1].detach().cpu()
+            smplx_faces = self.smplx_model.faces
+            save_two_meshes_with_colors(pred_vertices[::vis_interval], smplx_faces,
+                                        scene_vertices_to_world[0].detach().reshape(-1, 3),
+                                        scene_faces[0],
+                                        smpl_color = [1.0, 0.75, 0.8],
+                                        filename=os.path.splitext(save_name)[0] + f"_pred_{k:02d}" + os.path.splitext(save_name)[1])
+            gt_output = self.smplx_model(
+                global_orient=gt_global_orient,   # [B,3]
+                body_pose=gt_body_pose,           # [B,69]
+                betas=betas,                   # [B,10]
+                left_hand_pose=torch.zeros((total_length, 45)), 
+                right_hand_pose=torch.zeros((total_length, 45)),
+                jaw_pose=torch.zeros((total_length, 3)), 
+                leye_pose=torch.zeros((total_length, 3)),
+                reye_pose=torch.zeros((total_length, 3)),
+                expression=torch.zeros((total_length, 10)),
+            )
+            gt_vertices = gt_output.vertices.detach() - gt_output.joints.detach()[:, 0:1] + gt_position[k, :, 0:1].detach().cpu()
+            save_two_meshes_with_colors(gt_vertices[::vis_interval], smplx_faces,
+                                        scene_vertices_to_world[0].detach().reshape(-1, 3),
+                                        scene_faces[0],
+                                        smpl_color = [0.53, 0.81, 0.98],
+                                        filename=os.path.splitext(save_name)[0] + f"_gt" + os.path.splitext(save_name)[1])
+        
+        
+        predicted_angle_np = conversions.R2A(pred_rotmat.cpu().numpy())
+        predicted_angle = torch.from_numpy(predicted_angle_np).cuda().float()
+        predicted_root_angle = predicted_angle[...,0,:] 
+
+        gt_angle_np = conversions.R2A(gt_rotmat.cpu().numpy()) 
+        gt_angle = torch.from_numpy(gt_angle_np).cuda().float() 
+        gt_root_angle = gt_angle[...,0,:] 
+                
+        # after running iterations get numbers
+        upper_index = [3, 6, 9, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21]
+        lower_index = [0, 1, 2, 4, 5, 7, 8] # 10,11 is not considered in imus. (why? TIP does not have ankle joints)
+        hand_index = [20, 21]
+        foot_index = [7, 8]
+        eval_log = {}
+        for metric in self.eval_metric:
+            eval_log[metric] = []
+            for j in range(multin):
+                eval_metric = get_metric_function(metric)(
+                        predicted_position[j],
+                        predicted_angle[j],
+                        predicted_root_angle[j],
+                        gt_position[j],
+                        gt_angle[j],
+                        gt_root_angle[j],
+                        upper_index,
+                        lower_index,
+                        hand_index,
+                        foot_index,
+                        fps=motion_constants.FPS,
+                        root_rel=True
+                    ).cpu().numpy().item()
+                eval_log[metric].append(eval_metric)
+        
+        all_min_indices = {}
+        for metric, values in eval_log.items():
+            min_index = np.argmin(values)
+            # print(f"Metric '{metric}': 最小值的index是 {min_index}")
+            all_min_indices[metric] = min_index
+
+        min_idx = all_min_indices['mpjpe']
+
+        for metric, values in eval_log.items():
+            eval_log[metric] = values[min_idx]
+
+        
+        # add filename
+        parts = sampled_batch['filename'].split('/')
+        filename = '/'.join(parts[-1:])
+        eval_log['filename'] = filename
+        torch.cuda.empty_cache()
+
+        return eval_log
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     #parser.add_argument("--config_file", type=str, default="")
@@ -1368,7 +1565,12 @@ if __name__ == "__main__":
         imu2body_network.pretrain = True
         imu2body_network.build_network_gimo()
         imu2body_network.model.cuda()
-        with torch.no_grad():
-            imu2body_network.eval_vis()
+        if args.multin > 1:
+            print("#################### Multi hypothesis mode ####################")
+            with torch.no_grad():
+                imu2body_network.eval_multin(is_vis=True)
+        else:
+            with torch.no_grad():
+                imu2body_network.eval_vis()
     else:
         imu2body_network.run(mode=args.mode)
