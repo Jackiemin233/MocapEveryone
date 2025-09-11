@@ -1461,23 +1461,24 @@ class IMU2BodyNetwork(object):
                                         scene_faces[0],
                                         smpl_color = [1.0, 0.75, 0.8],
                                         filename=os.path.splitext(save_name)[0] + f"_pred_{k:02d}" + os.path.splitext(save_name)[1])
-            gt_output = self.smplx_model(
-                global_orient=gt_global_orient,   # [B,3]
-                body_pose=gt_body_pose,           # [B,69]
-                betas=betas,                   # [B,10]
-                left_hand_pose=torch.zeros((total_length, 45)), 
-                right_hand_pose=torch.zeros((total_length, 45)),
-                jaw_pose=torch.zeros((total_length, 3)), 
-                leye_pose=torch.zeros((total_length, 3)),
-                reye_pose=torch.zeros((total_length, 3)),
-                expression=torch.zeros((total_length, 10)),
-            )
-            gt_vertices = gt_output.vertices.detach() - gt_output.joints.detach()[:, 0:1] + gt_position[k, :, 0:1].detach().cpu()
-            save_two_meshes_with_colors(gt_vertices[::vis_interval], smplx_faces,
-                                        scene_vertices_to_world[0].detach().reshape(-1, 3),
-                                        scene_faces[0],
-                                        smpl_color = [0.53, 0.81, 0.98],
-                                        filename=os.path.splitext(save_name)[0] + f"_gt" + os.path.splitext(save_name)[1])
+            if k == 0:
+                gt_output = self.smplx_model(
+                    global_orient=gt_global_orient,   # [B,3]
+                    body_pose=gt_body_pose,           # [B,69]
+                    betas=betas,                   # [B,10]
+                    left_hand_pose=torch.zeros((total_length, 45)), 
+                    right_hand_pose=torch.zeros((total_length, 45)),
+                    jaw_pose=torch.zeros((total_length, 3)), 
+                    leye_pose=torch.zeros((total_length, 3)),
+                    reye_pose=torch.zeros((total_length, 3)),
+                    expression=torch.zeros((total_length, 10)),
+                )
+                gt_vertices = gt_output.vertices.detach() - gt_output.joints.detach()[:, 0:1] + gt_position[k, :, 0:1].detach().cpu()
+                save_two_meshes_with_colors(gt_vertices[::vis_interval], smplx_faces,
+                                            scene_vertices_to_world[0].detach().reshape(-1, 3),
+                                            scene_faces[0],
+                                            smpl_color = [0.53, 0.81, 0.98],
+                                            filename=os.path.splitext(save_name)[0] + f"_gt" + os.path.splitext(save_name)[1])
         
         
         predicted_angle_np = conversions.R2A(pred_rotmat.cpu().numpy())
