@@ -5,6 +5,7 @@ vis/
 /data/
 output
 imu2body/output_envposer/
+imu2body/output_agrol/
 results
 /libraries/MASt3R-SLAM
 /libraries/S2Fusion

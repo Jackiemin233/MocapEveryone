@@ -1382,6 +1382,7 @@ class IMU2BodyNetwork(object):
 
         gp = GPTimeNoiseTBD(total_length, lengthscale=5.0, jitter=1e-6, device=output_mean_total.device, dtype=output_mean_total.dtype)  # 可缓存
         eps = gp.sample_eps(multin, D)  # [T,B,D]
+        eps[:, :, :12] = 0.
         output_theta_total = output_mean_total + tau * output_std_total * eps
         output_theta_total = output_theta_total.permute(1, 0, 2).to(self.device)            # multin, T_tot, D
 

@@ -119,7 +119,7 @@
             "type": "debugpy",
             "request": "launch",
             "program": "${workspaceFolder}/imu2body/run_gimo_train.py",
-            "env":{"CUDA_VISIBLE_DEVICES":"3"},
+            "env":{"CUDA_VISIBLE_DEVICES":"1"},
             "args": [
                 "--test_name=exp_0907_swt_ada_cxt_contact",
                 "--mode=test_vis",
